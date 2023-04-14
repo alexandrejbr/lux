@@ -60,7 +60,9 @@ start_monitor(I, Cmd, Name, ExtraLogs) ->
                            health = alive,
                            vars = NewVarVals ++ I#istate.global_vars,
                            match_timeout = C#cstate.match_timeout,
-                           pattern_mode = C#cstate.pattern_mode},
+                           pattern_mode = C#cstate.pattern_mode,
+                           fail_regexp = no_regexp,
+                           success_regexp = no_regexp},
             I2 = I#istate{active_shell = Shell,
                           active_name = Name},
             {ok, I2#istate{logs = I2#istate.logs ++ [Logs]}};
@@ -149,8 +151,8 @@ open_logfile(C, Slogan) ->
 choose_exec(#cstate{shell_cmd = Cmd,
                     shell_args = Args} = C) ->
     case C#cstate.shell_wrapper of
-        undefined -> {Cmd, Args};
-        Wrapper -> {Wrapper, [Cmd | Args]}
+        no_wrapper -> {Cmd, Args};
+        Wrapper    -> {Wrapper, [Cmd | Args]}
     end.
 
 shell_loop(C, OrigC) ->
@@ -217,7 +219,7 @@ shell_wait_for_event(#cstate{name = _Name} = C, OrigC) ->
         {wakeup, Secs} ->
             clog(C, wake, "up (~p seconds)", [Secs]),
             dlog(C, ?dmore,"mode=resume (wakeup)", []),
-            undefined = C#cstate.expected, % Assert
+            no_cmd = C#cstate.expected, % Assert
             C2 = C#cstate{mode = resume,
                           wakeup_ref = undefined},
             expect_more(C2);
@@ -251,7 +253,7 @@ shell_wait_for_event(#cstate{name = _Name} = C, OrigC) ->
 loop_timeout(C) ->
     IdleThreshold = lux_utils:multiply(timer:seconds(3), C#cstate.multiplier),
     if
-        C#cstate.expected =:= undefined ->
+        C#cstate.expected =:= no_cmd ->
             infinity;
         C#cstate.timer_ref =/= undefined ->
             IdleThreshold;
@@ -410,7 +412,7 @@ opt_sync_reply(C, From, When) ->
             sync_reply(C, From);
         immediate ->
             sync_reply(C, From);
-        wait_for_expect when C#cstate.expected =:= undefined ->
+        wait_for_expect when C#cstate.expected =:= no_cmd ->
             sync_reply(C, From);
         wait_for_expect ->
             C#cstate{wait_for_expect = From}
@@ -449,7 +451,7 @@ assert_eval(C, Cmd, _From) when C#cstate.no_more_output andalso
                " in context of a running shell">>,
     C2 = C#cstate{latest_cmd = Cmd},
     stop(C2, error, ErrBin, []);
-assert_eval(C, _Cmd, _From) when C#cstate.expected =:= undefined ->
+assert_eval(C, _Cmd, _From) when C#cstate.expected =:= no_cmd ->
     ok;
 assert_eval(_C, #cmd{type = Type}, _From)
   when Type =:= variable;
@@ -525,7 +527,7 @@ shell_eval(#cstate{name = Name} = C0,
                       state_changed = true,
                       expected = NewCmd,
                       pre_expected = []};
-        expect when C#cstate.expected =:= undefined andalso
+        expect when C#cstate.expected =:= no_cmd andalso
                     C#cstate.pre_expected =:= [] ->
             %% Single regexp
             true = lists:member(element(2, Arg), [single,multi]), % Assert
@@ -542,28 +544,31 @@ shell_eval(#cstate{name = Name} = C0,
                       " Must be ended with ?.\n", []),
             stop(C, error, ?l2b(Err), []);
         fail ->
-            PatCmd =
+            Pattern =
                 if
-                    Arg =:= reset -> undefined;
-                    true          -> Cmd
+                    Arg =:= reset ->
+                        no_pattern;
+                    true ->
+                        #pattern{cmd = Cmd,
+                                 pos_stack = C#cstate.pos_stack}
                 end,
             {_, RegExp} = extract_regexp(Arg),
             clog(C, fail, "pattern ~p", [lux_utils:to_string(RegExp)]),
-            Pattern = #pattern{cmd = PatCmd, pos_stack = C#cstate.pos_stack},
             C#cstate{state_changed = true,
-                     fail = Pattern};
+                     fail_pattern = Pattern};
         success ->
-            PatCmd =
+            Pattern =
                 if
-                    Arg =:= reset -> undefined;
-                    true          -> Cmd
+                    Arg =:= reset ->
+                        no_pattern;
+                    true ->
+                        #pattern{cmd = Cmd,
+                                 pos_stack = C#cstate.pos_stack}
                 end,
             {_, RegExp} = extract_regexp(Arg),
             clog(C, success, "pattern ~p", [lux_utils:to_string(RegExp)]),
-            Pattern = #pattern{cmd = PatCmd,
-                               pos_stack = C#cstate.pos_stack},
             C#cstate{state_changed = true,
-                     success = Pattern};
+                     success_pattern = Pattern};
         break ->
             {_, RegExp} = extract_regexp(Arg),
             clog(C, break, "pattern ~p", [lux_utils:to_string(RegExp)]),
@@ -583,7 +588,7 @@ shell_eval(#cstate{name = Name} = C0,
             Secs = Arg,
             clog(C, sleep, "(~p seconds)", [Secs]),
             true = is_integer(Secs), % Assert
-            undefined = C#cstate.expected, % Assert
+            no_cmd = C#cstate.expected, % Assert
             Progress = C#cstate.progress,
             Self = self(),
             WakeUpMsg = {wakeup, Secs},
@@ -657,13 +662,13 @@ cleanup(C, _Type) ->
     C1 = clear_expected(C, "(cleanup)", suspend),
     C2 = flush_port(C1, []),
     C3 = match_patterns(C2),
-    case C3#cstate.fail of
-        undefined -> ok;
-        _         -> clog(C3, fail, "pattern reset", [])
+    case C3#cstate.fail_pattern of
+        no_pattern -> ok;
+        #pattern{} -> clog(C3, fail, "pattern reset", [])
     end,
-    case C3#cstate.success of
-        undefined  -> ok;
-        _          -> clog(C3, success, "pattern reset", [])
+    case C3#cstate.success_pattern of
+        no_pattern -> ok;
+        #pattern{} -> clog(C3, success, "pattern reset", [])
     end,
     LoopStack = C3#cstate.loop_stack,
     LoopStack2  = [L#loop{mode = break} || L <- LoopStack],
@@ -671,11 +676,11 @@ cleanup(C, _Type) ->
         false -> ok;
         true  -> clog(C3, break, "pattern reset", [])
     end,
-    C4 = C3#cstate{expected = undefined,
-                   fail = undefined,
-                   success = undefined,
+    C4 = C3#cstate{expected = no_cmd,
+                   fail_pattern = no_pattern,
+                   success_pattern = no_pattern,
                    loop_stack = LoopStack2},
-    dlog(C4, ?dmore, "expected=undefined (cleanup)", []),
+    dlog(C4, ?dmore, "expected=no_cmd (cleanup)", []),
     opt_late_sync_reply(C4).
 
 reset_output_buffer(C, Context) ->
@@ -754,7 +759,7 @@ want_more(#cstate{mode = Mode,
                   waiting = Waiting,
                   wakeup_ref = WakeupRef}) ->
     Mode =:= resume andalso
-    Expected =:= undefined andalso
+    Expected =:= no_cmd andalso
     not Waiting andalso
     WakeupRef =:= undefined.
 
@@ -800,21 +805,21 @@ expect(#cstate{state_changed = true,
     if
         WakeupRef =/= undefined ->
             %% Sleeping
-            undefined = Expected, % Assert
+            no_cmd = Expected, % Assert
             suspend = Mode, % Assert
             undefined = TimerRef, % Assert
             C;
         Mode =:= suspend ->
             %% Suspended
-            undefined = Expected, % Assert
+            no_cmd = Expected, % Assert
             undefined = TimerRef, % Assert
             C;
         Mode =:= stop ->
             %% Stopped
-            undefined = Expected, % Assert
+            no_cmd = Expected, % Assert
             undefined = TimerRef, % Assert
             C;
-        Mode =:= resume andalso Expected =:= undefined ->
+        Mode =:= resume andalso Expected =:= no_cmd  ->
             %% Nothing to wait for
             undefined = TimerRef, % Assert
             C;
@@ -845,7 +850,7 @@ expect(#cstate{state_changed = true,
                                   ExitStatus/binary>>,
                     C5 = try_match(C4, AltActual, AltSkip), % Fail if nomatch
                     C6 = C5#cstate{actual = <<>>,
-                                   expected = undefined},
+                                   expected = no_cmd},
                     opt_late_sync_reply(C6);
                 MatchExitStatus ->
                     %% Wait for port program to close
@@ -902,7 +907,7 @@ match_more(C, SubMatches) ->
           [ lux_utils:quote_newlines(SV)]) ||
         SV <- SubVars],
     send_reply(C, C#cstate.parent, {submatch_vars, self(), SubVars}),
-    C2 = C#cstate{expected = undefined},
+    C2 = C#cstate{expected = no_cmd},
     dlog(C2, ?dmore, "expected=[] (waiting)", []),
     opt_late_sync_reply(C2).
 
@@ -1002,19 +1007,19 @@ match_alt_patterns(C, AltActual, AltRest, LogFuns) ->
                             AltActual,
                             fail,
                             <<?fail_pattern_matched>>,
-                            C#cstate.fail),
+                            C#cstate.fail_pattern),
     C3 = match_stop_pattern(C2,
                             AltActual,
                             success,
                             <<?success_pattern_matched>>,
-                            C#cstate.success),
+                            C2#cstate.success_pattern),
 
     %% Search in reverse order. Top loop first.
     AllStack = lists:reverse(C3#cstate.loop_stack),
     match_break_patterns(C3, AltActual, AltRest, AllStack, [], LogFuns).
 
-match_stop_pattern(C, AltActual, StopEvent, StopContext, StopCmd) ->
-    {Res, _OptMulti} = match(AltActual, StopCmd),
+match_stop_pattern(C, AltActual, StopEvent, StopContext, StopPattern) ->
+    {Res, _OptMulti} = match(AltActual, StopPattern),
     case Res of
         {match, Matches} ->
             %% Stop pattern matched. Do not eval LogFuns.
@@ -1026,8 +1031,10 @@ match_stop_pattern(C, AltActual, StopEvent, StopContext, StopCmd) ->
             stop(C2, StopEvent, ActualStop, []);
         nomatch ->
             C;
-        {{'EXIT', Reason}, _} ->
-            {_, RegExp} = extract_regexp((StopCmd)#cmd.arg),
+        {{'EXIT', Reason}, _} when StopPattern =/= no_pattern ->
+            StopCmd = StopPattern#pattern.cmd,
+            StopArg = StopCmd#cmd.arg,
+            {_, RegExp} = extract_regexp(StopArg),
             Err = ?FF("Bad regexp:\n\t~p\n"
                       "Reason:\n\t~p\n",
                       [RegExp, Reason]),
@@ -1102,7 +1109,7 @@ clear_expected(C, Context, Mode0) ->
             _    -> Mode0
         end,
     C3 = C2#cstate{mode = Mode,
-                   expected = undefined,
+                   expected = no_cmd,
                    wakeup_ref = undefined},
     dlog(C3, ?dmore, "expected=[]~s", [Context]),
     C3.
@@ -1148,9 +1155,10 @@ split_total(Actual, Matches, AltSkip) ->
     end,
     {Skip, Match, Rest, SubMatches}.
 
-match(_Actual, undefined) ->
+match(_Actual, no_pattern) ->
     {nomatch, single};
-match(Actual, #pattern{cmd = Cmd}) -> % fail or success pattern
+match(Actual, #pattern{cmd = Cmd}) % fail or success pattern
+  when is_record(Cmd, cmd) ->
     match(Actual, Cmd);
 match(Actual, #cmd{type = Type, arg = Arg}) ->
     if
@@ -1506,8 +1514,8 @@ stop(C, Outcome0, Actual, PreEvents) when is_binary(Actual) orelse
                   warnings = C3#cstate.warnings},
     %% io:format("\nRES ~p\n", [Res]),
     ?TRACE_ME2(40, C3#cstate.name, Outcome, [{actual, Actual}, Res]),
-    %%  C3 = opt_late_sync_reply(C2#cstate{expected = undefined}),
-    C4 = C3#cstate{expected = undefined, actual = <<>>, mode = stop},
+    %%  C3 = opt_late_sync_reply(C2#cstate{expected = no_cmd}),
+    C4 = C3#cstate{expected = no_cmd, actual = <<>>, mode = stop},
     send_reply(C3, C3#cstate.parent, {stop, self(), Res}),
     if
         Outcome =:= shutdown ->
@@ -1538,7 +1546,7 @@ clog_stack(#cstate{orig_file = File,
 prepare_outcome(C, Outcome, Actual) ->
     Context =
         case Actual of
-            <<?fail_pattern_matched,    _/binary>> ->
+            <<?fail_pattern_matched, _/binary>> ->
                 fail_pattern_matched;
             <<?success_pattern_matched, _/binary>> ->
                 success_pattern_matched;
@@ -1550,15 +1558,15 @@ prepare_outcome(C, Outcome, Actual) ->
     if
         Outcome =:= fail, Context =:= fail_pattern_matched ->
             NewOutcome = Outcome,
-            Fail = C#cstate.fail,
-            FailCmd = Fail#pattern.cmd,
+            FailPattern = C#cstate.fail_pattern,
+            FailCmd = FailPattern#pattern.cmd,
             {_, FailRegExp} = extract_regexp(FailCmd#cmd.arg),
             Extra = FailRegExp,
             clog(C, pattern, "~p", [lux_utils:to_string(FailRegExp)]);
         Outcome =:= success, Context =:= success_pattern_matched ->
             NewOutcome = Outcome,
-            Success = C#cstate.success,
-            SuccessCmd = Success#pattern.cmd,
+            SuccessPattern = C#cstate.success_pattern,
+            SuccessCmd = SuccessPattern#pattern.cmd,
             {_, SuccessRegExp} = extract_regexp(SuccessCmd#cmd.arg),
             Extra = SuccessRegExp,
             clog(C, pattern, "~p", [lux_utils:to_string(SuccessRegExp)]);
@@ -1607,7 +1615,7 @@ close_logs_and_exit(C, IE) when element(1, IE) =:= internal_error ->
     Skip = C2#cstate.actual,
     SkipEvent = {skip, "\"~s\"", [lux_utils:to_string(Skip)]},
     clog(C2,[SkipEvent, CloseEvent]),
-    C3 = C2#cstate{expected = undefined},
+    C3 = C2#cstate{expected = no_cmd},
     C4 = close_logs(C3),
     send_reply(C4, C4#cstate.parent, {stop, self(), Res}),
     port_close_and_exit(C4, shutdown, Res).

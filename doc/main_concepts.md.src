@@ -10,7 +10,7 @@ the Lux script is an error, not a failure.
 
 A Lux script consists of a sequence of instructions, mostly `send`
 and `expect` operations, read in sequence from top to bottom. The test
-case **succeed**s if all statements in the script are executed (or if an
+case **succeed**s if all commands in the script are executed (or if an
 optional success criteria matched). The test case **fail**s if there
 is an `expect` operation not matching within a given time (or if an
 optional failure criteria matches).
@@ -24,10 +24,10 @@ Each `send` and `expect` operation is directed to one particular shell
 shell. The **stdout** and **stderr** streams of the shell are combined
 to one single output stream. A Lux script can start and control
 many concurrent shells, but at any time point only one is the active
-shell which can evaulate new Lux statements.
+shell which can evaulate new Lux commands.
 
 It is possible to reference **variables** in the `send`, `expect`,
-`my`, `local`, `global` and `config` statements, using the standard
+`my`, `local`, `global` and `config` commands, using the standard
 shell `$var` or `${var}` notation. Note that the substitution is
 performed by the Lux engine and not by the process running within
 the shell. The variables are initially set to all **environment
@@ -44,10 +44,10 @@ literally to the shell even if the Lux engine happens to have
 have a variable registered with that name. In order to achieve this
 the `$var` must be escaped as `$$var`.
 
-The [regular expression][]s in `expect` statements may contain
+The [regular expression][]s in `expect` commands may contain
 **sub-patterns**. The values matching captured sub-patterns may be
 accessed in the following variable assignments. For example if the
-statement `?begin (.*) middle (.*) end` matches the actual shell output
+command `?begin (.*) middle (.*) end` matches the actual shell output
 `begin abc middle def end`. The captured sub-patterns can be accessed
 as numbered variables: `[local foo=the vals are $1 and $2]` which will
 assign the variable `foo` to the value "`the vals are abc and def`".

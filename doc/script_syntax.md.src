@@ -13,8 +13,8 @@ Lines beginning with `"""Char` are **multi-line quotes**. The quote
 ends with the next line beginning with `"""`. The opening quote and
 closing quote must be in the same column of the script. The char right
 after the first `"""` determines how the multi-line quote will be
-interpreted. The char is interpreted as a statement just like any of
-the single line statement characters (so it can be e.g. `?`, `!`, `~`,
+interpreted. The char is interpreted as a command just like any of
+the single line command characters (so it can be e.g. `?`, `!`, `~`,
 `#`, `-`, etc).
 
 When multi-line quotes are indented the leading whitespaces are
@@ -97,14 +97,14 @@ match.
 
 **-**  
 **-Regexp**  
-Sets the failure pattern for a shell to a regular expression (see
+Sets the fail pattern for a shell to a regular expression (see
 [regular expression][]). It is typically used to match error
 messages. If the given `Regexp` matches, the test case is considered
 to have failed (no further processing of the script will be performed
-besides the `cleanup`). If no `Regexp` is given, the failure pattern
+besides the `cleanup`). If no `Regexp` is given, the fail pattern
 is reset (cleared).
 
-The failure pattern is primarily searched for when the script
+The fail pattern is primarily searched for when the script
 explicitly is expecting some output. That is when a command like `?`,
 `??` or `???` is evaluated. It is also searched for when a shell
 cannot produce more output, for example when a shell exits or when
@@ -133,12 +133,12 @@ See also the configuration parameter `--pattern_mode` and the command
 **@**  
 **@Regexp**  
 Sets a loop break pattern for a shell to a regular expression (see
-[regular expression][]). This statement is only valid in loops. It
+[regular expression][]). This command is only valid in loops. It
 is typically used to match output from a poll like command which is
 executed over and over again and after a while the command causes some
 output that will match the break pattern.  When the given `Regexp`
 matches, the loop (and all nested loops) is immediately exited and the
-execution continues with the first statement after the loop.
+execution continues with the first command after the loop.
 
 The break pattern is only searched for when the script explicitly is
 expecting some output. That is when a command like `?`, `??` or `???`
@@ -160,10 +160,10 @@ Note that the "exit" command in a Bourne shell may return a non-zero
 status code if the latest executed command returned a non-zero. Use
 "exit 0" if that is an issue.
 
-### Meta statements ###
+### Meta commands ###
 
 **\[**  
-Indicates the beginning of a meta statement. Meta statements are ended
+Indicates the beginning of a meta command. Meta commands are ended
 on the same line with a `]`.
 
 **\[newshell Name\]**  
@@ -193,18 +193,18 @@ to create a new shell named `Name`. See the configuration parameter
 **\[cleanup\]**  
 is the cleanup marker. If the script is prematurely aborted due to
 a failure (or due to a matching success pattern) the remaining
-statements in the file are normally skipped. But if the there is a
+commands in the file are normally skipped. But if the there is a
 cleanup marker after the failing line (and this is the only
 cleanup marker), the lines after the cleanup marker will also be
 run in order to enable a controlled cleanup of leftovers. Such as
 killing processes, removing files etc. When the cleanup marker is
 evaluated, the running shells will be set into a non accessible mode
-(**zombie mode**) and their failure and success patterns will be
+(**zombie mode**) and their fail and success patterns will be
 reset (cleared). This means that output received by zombie shells
-during the cleanup is not matched against failure or success
+during the cleanup is not matched against fail or success
 patterns. A brand new shell (called something beginning with
 `cleanup`) will also be started. If the cleanup code causes a failure
-the remaining statements (on that level) will be skipped.
+the remaining commands (on that level) will be skipped.
 
 The **environment variable** `LUX_START_REASON` is set to `normal`
 in most shells, but if the cleanup is run due to premature failure or
@@ -371,13 +371,13 @@ Here is a small test program demonstrating the usage.
     LUX_SUCCESS_PATTERN - value of success pattern in the active Lux shell
     PS1                 - shell prompt variable set by Lux
 
-###Miscellaneous statements###
+###Miscellaneous commands###
 
 **\[doc String\]**  
 **\[docN String\]**  
 A test case slogan displayed in the summary log. It is also possible
 to document parts of a test case by specifying a documentation level
-`N`. In that case the doc statement should look like `[docN String]`
+`N`. In that case the doc command should look like `[docN String]`
 where `N` is an integer. `doc2` would mean that the documentation is on
 level 2. Doc strings can be extracted from the scripts and written to
 stdout with the`--mode=doc` and `--doc=N` command line options. It
@@ -437,7 +437,7 @@ Displays `String` on the `stdout` stream together with the rest of the
 progress info. May contain newlines.
 
 **\[config Var=Value\]**  
-assigns a value to a [configuration parameter](#config_params). The
+Assigns a value to a [configuration parameter](#config_params). The
 assignment takes place during parsing of the script file. The
 configuration parameters in **architecture specific files** can be
 overridden by **command line options**. For example `[config

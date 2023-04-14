@@ -102,8 +102,8 @@
          vars            :: [string()],                     % ["name=val"]
          match_timeout   :: infinity  | non_neg_integer(),
          pattern_mode    :: all | skip,
-         fail_pattern    :: undefined | binary(),
-         success_pattern :: undefined | binary()}).
+         fail_regexp     :: no_regexp | binary(),
+         success_regexp  :: no_regexp | binary()}).
 
 -record(cmd_pos,
         {rev_file   :: [string()],
@@ -203,7 +203,7 @@
          risky_threshold  = ?DEFAULT_RISKY_THRESHOLD  :: float() | infinity,
          sloppy_threshold = ?DEFAULT_SLOPPY_THRESHOLD :: float() | infinity,
          newshell = false           :: boolean(),
-         shell_wrapper              :: undefined | string(),
+         shell_wrapper = no_wrapper :: no_wrapper | string(),
          shell_wrapper_mode = silent:: wrapper_mode(),
          shell_cmd = "/bin/sh"      :: string(),
          shell_args = ["-i"]        :: [string()],
@@ -254,13 +254,97 @@
          config_name = ?DEFAULT_CONFIG_NAME
                       :: binary(),              % --config
          run_dir      :: binary(),              % current dir during run
-         orig_run_dir :: binary(),              % current dir during run
          run_log_dir  :: binary(),              % rel dir where logs was created
-         orig_log_dir :: binary(),              % rel dir where logs was created
          new_log_dir  :: binary(),              % rel top dir for new logs
          repos_rev = ?DEFAULT_REV
                       :: binary(),              % --revision
          runs = []    :: [#run{}]}).            % list of cases
+
+-type case_result() ::
+        success |
+        warning |
+        {skip, [binary()]} |
+        {error, [binary()]} |
+        {error_line, binary(), [binary()]} |
+        {warning, binary(), binary(), atom(), binary(), binary(), binary()} |
+        {fail,    binary(), binary(), atom(), binary(), binary(), binary() |
+        binary()}.
+
+-record(warnings_and_result,
+        {warnings :: [binary()],
+         result   :: case_result()}).
+
+-record(test_case,
+        {name        :: string(),
+         run_dir     :: file:filename(),
+         run_log_dir :: file:filename(),
+         event_log   :: file:filename(),
+         html_log    :: file:filename(),
+         result      :: #warnings_and_result{}}).
+
+-record(error_case,
+        {name        :: string(),
+         run_dir     :: file:filename(),
+         run_log_dir :: file:filename(),
+         reason      :: binary(),
+         result      :: #warnings_and_result{}}).
+
+-record(file_lineno,
+        {file   :: binary(),
+         lineno :: binary()}).
+
+-record(result_section,
+        {slogan       :: binary(),
+         count        :: binary(),
+         file_linenos :: [#file_lineno{}]}).
+
+-record(result_summary,
+        {summary  :: binary(),
+         sections :: [#result_section{}]}).
+
+-record(run_ok,
+        {summary       :: summary(),
+         summary_log   :: string(),
+         suite_results :: [#result{}]}).
+
+-record(run_error,
+        {file   :: file:filename(),
+         reason :: binary()}).
+
+-record(suite_ok,
+        {summary           :: summary(),
+         file              :: string(),
+         full_lineno       :: string(),
+         shell_name        :: no_shell | string(),
+         case_log_dir      :: string(),
+         case_results      :: [#result{}],
+         details           :: binary(),
+         opaque            :: proplists:proplist()}).
+
+-record(suite_error,
+        {file        :: string(),
+         full_lineno :: string(),
+         reason      :: binary()}).
+
+-record(case_ok,
+        {outcome           :: success | warning | fail,
+         file              :: string(),
+         full_lineno       :: string(),
+         shell_name        :: no_shell | string(),
+         case_log_dir      :: string(),
+         run_warnings      :: [#warning{}],
+         unstable_warnings :: [#warning{}],
+         results           :: [#result{}],
+         details           :: binary(),
+         opaque            :: proplists:proplist()}).
+
+-record(case_error,
+        {file              :: string(),
+         full_lineno       :: string(),
+         case_log_dir      :: string(),
+         run_warnings      :: [#warning{}],
+         unstable_warnings :: [#warning{}],
+         reason            :: binary()}).
 
 -record(source,
         {branch       :: undefined | binary(),
@@ -331,7 +415,7 @@
          wakeup_ref              :: undefined | #timer_ref{},
          risky_threshold         :: float() | infinity,
          sloppy_threshold        :: float() | infinity,
-         shell_wrapper           :: undefined | string(),
+         shell_wrapper           :: no_wrapper | string(),
          shell_wrapper_mode      :: wrapper_mode(),
          shell_cmd               :: string(),
          shell_args              :: [string()],
@@ -339,10 +423,10 @@
          shell_prompt_regexp     :: string(),
          port                    :: port(),
          waiting = false         :: boolean(),
-         fail                    :: undefined | #pattern{},
-         success                 :: undefined | #pattern{},
+         fail_pattern    = no_pattern :: no_pattern | #pattern{},
+         success_pattern = no_pattern :: no_pattern | #pattern{},
          loop_stack = []         :: [#loop{}],
-         expected                :: undefined | #cmd{},
+         expected = no_cmd       :: no_cmd | #cmd{},
          pre_expected = []       :: [#cmd{}],
          actual = <<>>           :: binary(),
          state_changed = false   :: boolean(),

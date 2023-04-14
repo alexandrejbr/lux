@@ -16,7 +16,7 @@ is used to validate the scripts and display some warnings. The scripts
 are not executed.
 
 **--skip_skip**  
-causes all skip statements to be ignored. The skip statements are
+causes all skip commands to be ignored. The skip commands are
 mainly used to handle architecture specific quirks and are not really
 applicable during validation. So if you want validation of all scripts
 regardless of their skip settings you may need to use `--skip_skip`.
@@ -113,17 +113,17 @@ whitespaces are hard to see.
 **Warning: Missing summary doc (disabled for now)**  
 
 All scripts should document their purpose. This is done with the
-`[doc]` statement. This warning is displayed when there is no `doc`
-statement in the beginning of the script. The statement can be a
-single line `doc` statement or a multi-line `[doc]` ... `[enddoc]`
+`[doc]` command. This warning is displayed when there is no `doc`
+command in the beginning of the script. The command can be a
+single line `doc` command or a multi-line `[doc]` ... `[enddoc]`
 block.
 
 This particular warning is disabled for now.
 
 **Warning: Empty doc text**  
 
-This warns for a `[doc ]` statement only containing whitespaces. Write
-a proper documentation or remove the statement.
+This warns for a `[doc ]` command only containing whitespaces. Write
+a proper documentation or remove the command.
 
 **Warning: Missing summary line**  
 
@@ -230,7 +230,7 @@ There is good hygiene to ensure the cleanup code to be rock solid.
 **Warning: Fail but UNSTABLE as variable XXX is set**  
 
 This test case fails. But it does also have a `[config unstable=XXX]`
-statement causing the fail to be transformed into a warning. This
+command causing the fail to be transformed into a warning. This
 construct is intended to be used for buggy scripts which fails
 intermittently. It can also be used during development where you want
 the script to be run even though it is not fully functional
@@ -239,7 +239,7 @@ yet.
 **Warning: Fail but UNSTABLE as variable XXX is not set**  
 
 This test case fails. But it does also have a `[config unstable_unless=XXX]`
-statement causing the fail to be transformed into a warning. This
+command causing the fail to be transformed into a warning. This
 construct is intended to be used for buggy scripts which fails
 intermittently. It can also be used during development where you want
 the script to be run even though it is not fully functional

@@ -52,7 +52,7 @@ testsuite(Cases, RunDir, Indent) ->
      Indent, "</testsuite>\n"
     ].
 
-testcase({result_case, Filename, Reason, _Details}, RunDir, Indent) ->
+testcase(#error_case{name = Filename, reason = Reason}, RunDir, Indent) ->
     [
      Indent, "<testcase ",
      "classname=\"", classname(Filename, RunDir), "\" ",
@@ -60,7 +60,7 @@ testcase({result_case, Filename, Reason, _Details}, RunDir, Indent) ->
      Indent, ?INDENT, "<system-out>", Reason, "</system-out>\n",
      Indent, "</testcase>\n"
     ];
-testcase({test_case, Filename, _, _, _, Result}, RunDir, Indent) ->
+testcase(#test_case{name = Filename, result = Result}, RunDir, Indent) ->
     [
      Indent, "<testcase ",
      "classname=\"", classname(Filename, RunDir), "\" ",
@@ -80,11 +80,11 @@ classname(Filename, RunDir) ->
 name(Filename) ->
     filename:basename(Filename).
 
-body({warnings_and_result, _Warnings, skip}, Indent) ->
+body(#warnings_and_result{warnings = _, result = skip}, Indent) ->
     [Indent, "<skipped/>\n"];
-body({warnings_and_result,
-      _Warnings,
-      {_Res, LineNo, _Shell, _ExpectedTag, Expected, Actual, Details}},
+body(#warnings_and_result{warnings = _,
+                          result =  {_Res, LineNo, _Shell,
+                                     _ExpectedTag, Expected, Actual, Details}},
      _Indent) ->
     [
      "<failure type=\"NoMatch\">\n",
@@ -95,7 +95,7 @@ body({warnings_and_result,
      "\nDetails:\n", join(Details, "\n"),
      "]]>", "</failure>\n"
     ];
-body({warnings_and_result, _Warnings, Res}, Indent) ->
+body(#warnings_and_result{warnings= _, result = Res}, Indent) ->
     [Indent, "<!-- ", ?a2l(Res), " -->\n"];
 body({error, Reason}, _Indent) ->
     [

@@ -123,7 +123,7 @@ default_shell_wrapper() ->
     Wrapper = filename:join([code:priv_dir(?APPLICATION), "bin", "runpty"]),
     case filelib:is_regular(Wrapper) of
         true  -> Wrapper;
-        false -> undefined
+        false -> no_wrapper
     end.
 
 copy_orig(I, Script) ->
@@ -169,10 +169,6 @@ eval(OldI, Progress, Verbose,
                        trace_mode = TraceMode},
     Flag = process_flag(trap_exit, true),
     try
-        lux_log:safe_format(Progress, LogFun, undefined,
-                            "~s~s\n",
-                            [?TAG("script"),
-                             NewI#istate.file]),
         lux_log:safe_format(Progress, LogFun, undefined,
                             "~s~s\n",
                             [?TAG("event log"), EventLog]),
@@ -221,8 +217,12 @@ fatal_error(I, ReasonBin) when is_binary(ReasonBin) ->
     UnstableWarnings = [],
     print_warnings(I, RunWarnings, UnstableWarnings),
     double_ilog(I, "~sERROR ~s\n", [?TAG("result"), ?b2l(ReasonBin)]),
-    {case_error, I#istate.file, FullLineNo, I#istate.case_log_dir,
-     RunWarnings, UnstableWarnings, ReasonBin}.
+    #case_error{file = I#istate.file,
+                full_lineno = FullLineNo,
+                case_log_dir = I#istate.case_log_dir,
+                run_warnings = RunWarnings,
+                unstable_warnings = UnstableWarnings,
+                reason = ReasonBin}.
 
 print_warnings(I, RunWarnings, UnstableWarnings) ->
     P = fun(#warning{lineno=FullLineNo, reason=Reason}) ->
@@ -249,11 +249,11 @@ do_parse_iopts(I, [{Name, Val} | T], U) when is_atom(Name) ->
 do_parse_iopts(I, [], U) ->
     File = lux_utils:normalize_filename(I#istate.file),
     case I#istate.shell_wrapper of
-        "" -> ShellWrapper = undefined;
+        ""           -> ShellWrapper = no_wrapper;
         ShellWrapper -> ok
     end,
     case I#istate.post_case of
-        "" -> PostCase = undefined;
+        ""       -> PostCase = undefined;
         PostCase -> ok
     end,
     SuiteLogDir = lux_utils:normalize_filename(I#istate.suite_log_dir),
@@ -335,7 +335,7 @@ config_type(Name) ->
             {ok, #istate.newshell, [{atom, [false, true]}]};
         shell_wrapper ->
             {ok, #istate.shell_wrapper, [string,
-                                         {atom, [undefined]}]};
+                                         {atom, [no_wrapper]}]};
         shell_wrapper_mode ->
             {ok, #istate.shell_wrapper_mode, [{atom, [silent, debug, trace]}]};
         shell_cmd ->
@@ -596,10 +596,16 @@ print_success(I, File) ->
     CaseLogDir = I#istate.case_log_dir,
     Details = <<>>,
     Opaque = [{stopped_by_user, I#istate.stopped_by_user}],
-    {case_ok, Outcome, File, FullLineNo,
-     no_shell, CaseLogDir,
-     RunWarnings, UnstableWarnings,
-     Results, Details, Opaque}.
+    #case_ok{outcome = Outcome,
+             file = File,
+             full_lineno = FullLineNo,
+             shell_name = no_shell,
+             case_log_dir = CaseLogDir,
+             run_warnings = RunWarnings,
+             unstable_warnings = UnstableWarnings,
+             results = Results,
+             details = Details,
+             opaque = Opaque}.
 
 print_fail(OldI0, NewI, File, Results,
            #result{outcome      = fail,
@@ -655,10 +661,16 @@ print_fail(OldI0, NewI, File, Results,
     NewResults = [Fail],
     CaseLogDir = NewI#istate.case_log_dir,
     Details = FailBin,
-    {case_ok, Outcome, File, FullLineNo,
-     ShellName, CaseLogDir,
-     RunWarnings, UnstableWarnings,
-     NewResults, Details, Opaque}.
+    #case_ok{outcome = Outcome,
+             file = File,
+             full_lineno = FullLineNo,
+             shell_name = ShellName,
+             case_log_dir = CaseLogDir,
+             run_warnings = RunWarnings,
+             unstable_warnings = UnstableWarnings,
+             results = NewResults,
+             details = Details,
+             opaque = Opaque}.
 
 new_actual(Actual, Expected, Rest) when is_atom(Expected) ->
     NewExpected = ?a2b(Expected),

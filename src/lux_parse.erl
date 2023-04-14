@@ -762,8 +762,7 @@ parse_meta_token(P, Fd, Cmd, Meta, LineNo) ->
         "global " ++ VarVal ->
             parse_var(P, Fd, Cmd, global, VarVal);
         "timeout" ->
-            Time = "",
-            {P, Cmd#cmd{type = change_timeout, arg = Time}};
+            {P, Cmd#cmd{type = change_timeout, arg = default}};
         "timeout " ++ Time ->
             {P, Cmd#cmd{type = change_timeout, arg = Time}};
         "pattern_mode" ->

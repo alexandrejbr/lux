@@ -194,9 +194,9 @@ wrap_transform(Transform, Opts) ->
 
     lists:flatmap(Wrap, Transform).
 
-get_script({test_case, AbsScript, _Log, _Doc, _HtmlLog, _Res}) ->
+get_script(#test_case{name = AbsScript}) ->
     AbsScript;
-get_script({result_case, AbsScript, _Reason, _Details}) ->
+get_script(#error_case{name = AbsScript}) ->
     AbsScript.
 
 lookup_transform(AbsScript, Transform, NewA) ->
@@ -244,7 +244,8 @@ html_cases(A, SummaryLog, Result, Cases, ConfigSection, Transform)
      lux_html_utils:html_footer()
     ].
 
-html_summary_result(A, {result_summary, Summary, Sections}, Cases,
+html_summary_result(A, #result_summary{summary = Summary,
+                                       sections = Sections}, Cases,
                     IsTmp, IsMerge) ->
     %% io:format("Sections: ~p\n", [Sections]),
     ResultString = result_string(IsTmp, IsMerge),
@@ -306,26 +307,31 @@ result_string(IsTmp, IsMerge) ->
         true    -> "Final"
     end.
 
-html_summary_section(A, {section, Slogan, Count, FileBins}, Cases) ->
+html_summary_section(A, RS, Cases) ->
+    #result_section{slogan = Slogan,
+                    count = Count,
+                    file_linenos = FileLineNos} = RS,
     NamedLogs =
-        [{chop_root(drop_run_dir_prefix(A, Name)), HtmlLog} ||
-            {test_case, Name, _Log, _Doc, HtmlLog, _Res} <- Cases],
+        [{chop_root(drop_run_dir_prefix(A,
+                                        TC#test_case.name)),
+          TC#test_case.html_log} ||
+            TC <- Cases],
     [
      "<strong>", lux_html_utils:html_quote(Slogan), ": ", Count, "</strong>\n",
-     case FileBins of
+     case FileLineNos of
          [] ->
              [];
          _ ->
              [
               "<div class=\"event\"><pre>",
-              [html_summary_file(A, F, NamedLogs) || F <- FileBins],
+              [html_summary_file(A, F, NamedLogs) || F <- FileLineNos],
               "</pre></div>"
              ]
      end
     ].
 
-html_summary_file(A, {file_lineno, FileBin, LineNo}, NamedLogs)
-  when is_binary(FileBin) ->
+html_summary_file(A, #file_lineno{file = FileBin, lineno = LineNo}, NamedLogs)
+  when is_binary(FileBin), is_binary(LineNo) ->
     File = ?b2l(FileBin),
     PrefixedRelScript = prefixed_rel_script(A, A, File),
     RelFile = chop_root(drop_run_dir_prefix(A, File)),
@@ -339,7 +345,10 @@ html_summary_file(A, {file_lineno, FileBin, LineNo}, NamedLogs)
     end.
 
 html_cases2(NewA,
-            [{test_case, AbsScript, _Log, Doc, HtmlLog, Res} | Cases],
+            [#test_case{name = AbsScript,
+                        event_log = _,
+                        html_log = HtmlLog,
+                        result = Res} | Cases],
             Transform)
   when is_list(AbsScript) ->
     Tag = "a",
@@ -355,16 +364,13 @@ html_cases2(NewA,
      lux_html_utils:html_href("h2", "Test case: ", "",
                               NewRelHtmlLog, PrefixedRelScript),
      "\n<div class=\"case\"><pre>",
-     html_doc(Tag, Doc),
      html_result(Tag, Res, NewRelHtmlLog),
      "\n",
      "</pre></div>",
      html_cases2(NewA, Cases, Transform)
     ];
-html_cases2(NewA,
-            [{result_case, AbsScript, Reason, Details} | Cases],
-            Transform)
-  when is_list(AbsScript) ->
+html_cases2(NewA, [EC | Cases], Transform) ->
+    #error_case{name = AbsScript, reason = Reason} = EC,
     Tag = "a",
     OrigA = lookup_transform(AbsScript, Transform, NewA),
     PrefixedRelScript = prefixed_rel_script(OrigA, NewA, AbsScript),
@@ -378,27 +384,11 @@ html_cases2(NewA,
      lux_html_utils:html_quote(Reason),
      "</strong></",
      Tag, ">\n",
-     "\n",
-     Details,
      "</pre></div>",
      html_cases2(NewA, Cases, Transform)
     ];
 html_cases2(_NewA, [], _Transform) ->
     [].
-
-html_doc(_Tag, []) ->
-    [];
-html_doc(Tag, [Slogan | Desc]) ->
-    [
-     "\n<", Tag, ">Description: <strong>",
-     lux_html_utils:html_quote(Slogan),
-     "</strong></",
-     Tag, ">\n",
-     case Desc of
-         [] -> [];
-         _  -> html_div(<<"event">>, lux_utils:expand_lines(Desc))
-     end
-    ].
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Annotate a lux with events from the log
@@ -841,7 +831,8 @@ html_timer_data(L, Data) ->
      "\">", Pretty, "</a>"
     ].
 
-html_result(Tag, {warnings_and_result, Warnings, Result}, HtmlLog) ->
+html_result(Tag, #warnings_and_result{warnings = Warnings,
+                                      result = Result}, HtmlLog) ->
     PrettyWarnings =
         [["\n<", Tag,
           "><strong>Warning at line ",

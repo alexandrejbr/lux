@@ -560,7 +560,7 @@ do_foldl_cmds(Fun, Acc, File, RevFile, PosStack, [Cmd | Cmds], FullDepth) ->
                          _FirstLineNo, _LastLineNo, Body} =
                             MacroArg,
                         SubFun(MacroFile, Body, [CmdPos | PosStack]);
-                _NoMatch ->
+                    _NoMatch ->
                         %% Ignore non-existent macro
                         Acc
                 end;

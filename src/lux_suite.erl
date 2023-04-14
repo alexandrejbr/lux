@@ -35,10 +35,9 @@ run(Files, Opts, PrevLogDir, OrigArgs) when is_list(Files) ->
                 ?CATCH_STACKTRACE(throw, {error, FileErr, Reason}, _EST)
                 {error, FileErr, Reason};
                 ?CATCH_STACKTRACE(Class, Reason, EST)
-                ReasonStr =
-                lists:flatten(?FF("~p:~p\n\t~p", [Class, Reason, EST])),
+                ReasonBin = ?l2b(?FF("~p:~p\n\t~p", [Class, Reason, EST])),
                 {ok, Cwd} = file:get_cwd(),
-                {run_error, Cwd, ReasonStr}
+                #run_error{file = Cwd, reason = ReasonBin}
             end;
         {ok, R} ->
             LogDir = R#rstate.log_dir,
@@ -55,34 +54,32 @@ run(Files, Opts, PrevLogDir, OrigArgs) when is_list(Files) ->
                     full_run(R5, ConfigProps, SummaryLog)
                 catch
                     throw:{error, undefined, no_input_files} ->
-                        {ok, Cwd} = file:get_cwd(),
-                        {run_error, Cwd, "ERROR: No input files\n"};
+                        no_input_files;
                     throw:{error, FileErr, ReasonStr} ->
-                        {run_error, FileErr, ReasonStr};
+                        #run_error{file = FileErr, reason = ?l2b(ReasonStr)};
                     ?CATCH_STACKTRACE(Class, Reason, EST)
-                    ReasonStr =
-                    lists:flatten(?FF("~p:~p\n\t~p", [Class, Reason, EST])),
-                    {run_error, SummaryLog, ReasonStr}
+                    ReasonBin = ?l2b(?FF("~p:~p\n\t~p", [Class, Reason, EST])),
+                    #run_error{file = SummaryLog, reason = ReasonBin}
                 after
                     lux_utils:cancel_timer(SuiteRef)
                 end
             catch
                 throw:{error, FileErr2, ReasonStr2} ->
-                    {run_error, FileErr2, ReasonStr2};
+                    {run_error, FileErr2, ?l2b(ReasonStr2)};
                 ?CATCH_STACKTRACE(Class2, Reason2, EST2)
                     ReasonStr2 =
                         lists:flatten(?FF("~p:~p\n\t~p",
                                           [Class2, Reason2, EST2])),
-                {run_error, SummaryLog, ReasonStr2}
+                #run_error{file = SummaryLog, reason = ?l2b(ReasonStr2)}
             end;
         {error, {badarg, Name, Val}} ->
-            ArgErr =
+            ArgErrBin =
                 lux_log:safe_format(undefined,
                                     "ERROR: ~p is an illegal argument (~p)\n",
                                     [Name, Val]),
-            {run_error, hd(Files), ArgErr};
-        {error, File, ArgErr} ->
-            {run_error, File, ArgErr}
+            #run_error{file = hd(Files), reason = ArgErrBin};
+        {error, File, ArgErrStr} ->
+            #run_error{file = File, reason = ?l2b(ArgErrStr)}
     end.
 
 adjust_files(R) ->
@@ -172,9 +169,11 @@ full_run(#rstate{mode = Mode} = R, _ConfigProps, SummaryLog)
        Mode =:= expand ->
     InitialSummary = success,
     InitialSuiteRes = [],
-    {_R2, Summary, Results} =
+    {_R2, Summary, SuiteResults} =
         run_suite(R, R#rstate.files, InitialSummary, InitialSuiteRes),
-    {run_ok, Summary, SummaryLog, Results};
+    #run_ok{summary = Summary,
+            summary_log = SummaryLog,
+            suite_results = SuiteResults};
 full_run(#rstate{progress = Progress} = R, ConfigProps, SummaryLog) ->
     ExtendRun = R#rstate.extend_run,
     case lux_log:open_summary_log(Progress, SummaryLog, ExtendRun) of
@@ -197,13 +196,13 @@ full_run(#rstate{progress = Progress} = R, ConfigProps, SummaryLog) ->
             annotate_final_summary_log(R3, Summary, HtmlPrio,
                                        SummaryLog, SuiteResults);
         {error, FileReason} ->
-            FileErr =
+            FileErrBin =
                 lux_log:safe_format(undefined,
                                     "ERROR: Failed to open logfile:"
                                     " ~s -> ~s\n",
                                     [SummaryLog,
                                      file:format_error(FileReason)]),
-            {run_error, SummaryLog, FileErr}
+            #run_error{file = SummaryLog, reason = FileErrBin}
     end.
 
 maybe_write_junit_report(#rstate{junit = false}, _, _) ->
@@ -237,12 +236,17 @@ deep_parse_summary_log(Log) ->
 flatten_summary_results({ok, _ResSummary, Cases, _, _, _}) ->
     Init =
         fun(Summary, Script, FullLineNo) ->
-                {suite_ok, Summary, Script, FullLineNo,
-                 no_shell, no_case_log_dir,
-                 [], <<>>, []}
+                #suite_ok{summary = Summary,
+                          file = Script,
+                          full_lineno = FullLineNo,
+                          shell_name = no_shell,
+                          case_log_dir = no_case_log_dir,
+                          case_results = [],
+                          details = <<>>,
+                          opaque = []}
         end,
     Fun =
-        fun(Script, {warnings_and_result, _Warnings, Summary}) ->
+        fun(Script, #warnings_and_result{warnings = _, result = Summary}) ->
                 case Summary of
                     success ->
                         Init(Summary, Script, "0");
@@ -253,22 +257,33 @@ flatten_summary_results({ok, _ResSummary, Cases, _, _, _}) ->
                     {warning, _FullLineNo, _SN, _ET, _E, _A, _D} ->
                         Init(warning, Script, "0");
                     {error_line, RawLineNo, ReasonBin} ->
-                        {suite_error, Script, ?b2l(RawLineNo), ReasonBin};
+                        #suite_error{file =  Script,
+                                     full_lineno = ?b2l(RawLineNo),
+                                     reason = ReasonBin};
                     {error, [ReasonBin]} ->
                         case binary:split(ReasonBin, <<": ">>, [global]) of
                             [_, <<"Syntax error at line ", N/binary>>, _] ->
-                                {suite_error, Script, ?b2l(N), ReasonBin};
+                                #suite_error{file =  Script,
+                                             full_lineno = ?b2l(N),
+                                             reason = ReasonBin};
                             _ ->
-                                {suite_error, Script, "0", ReasonBin}
+                                #suite_error{file = Script,
+                                             full_lineno = "0",
+                                             reason = ReasonBin}
                         end;
                     {error, ReasonBin} ->
-                        {suite_error, Script, "0", ReasonBin};
+                        #suite_error{file = Script,
+                                     full_lineno = "0",
+                                     reason = ReasonBin};
                     {fail, RawLineNo, _SN, _ET, _E, _A, _D} ->
                         Init(fail, Script, ?b2l(RawLineNo))
                 end
         end,
     [Fun(Script, Res) ||
-        {test_case, Script, _Log, _Doc, _HtmlLog, Res} <- Cases];
+        #test_case{name = Script,
+                   event_log = _,
+                   html_log = _,
+                   result = Res} <- Cases];
 flatten_summary_results({error, _File, _Reason}) ->
     [].
 
@@ -359,8 +374,9 @@ collect_log(false, _Dir, _Base, Acc) ->
 
 transform_summary_results(DeepLogRes) ->
     Transform =
-        fun({Log, {ok, _Result, Cases, SummaryConfig, _Ctime, _EventLogs}}) ->
-                {Log, SummaryConfig, Cases}
+        fun({Log, {ok, _Result, Cases, SummaryConfigBins, _Ctime,
+                   _SuiteRunDir, _SuiteRunLogDir, _EventLogs}}) ->
+                {Log, SummaryConfigBins, Cases}
         end,
     lists:map(Transform, DeepLogRes).
 
@@ -403,16 +419,12 @@ merge_result_logs(RelTargetDir, RunDir, OrigRunDir, FlatLogRes) ->
                    filename:join(Cwd, F3)
         end,
     RebaseSuiteRes =
-        fun({suite_ok, Summary, Script, FullLineNo,
-             ShellName, CaseLogDir,
-             CaseResults, Details, Opaque}) ->
+        fun(#suite_ok{file = Script} = SuiteOk) ->
                 Script2 = RebaseScript(Script),
-                {suite_ok, Summary, Script2, FullLineNo,
-                 ShellName, CaseLogDir,
-                 CaseResults, Details, Opaque};
-           ({suite_error, Script, FullLineNo, Reason}) ->
+                SuiteOk#suite_ok{file = Script2};
+           (#suite_error{file =  Script} = SuiteErr) ->
                 Script2 = RebaseScript(Script),
-                {suite_error, Script2, FullLineNo, Reason}
+                SuiteErr#suite_error{file = Script2}
         end,
     RebasedFlatRes = lists:map(RebaseSuiteRes, FlatRes),
     Summary = case_summary(FlatRes, success),
@@ -421,10 +433,7 @@ merge_result_logs(RelTargetDir, RunDir, OrigRunDir, FlatLogRes) ->
     lux_log:write_results(silent, TargetSummaryLog, Summary,
                          RebasedFlatRes, Warnings).
 
-case_summary([CaseRes | Rest], OldSummary) ->
-    {suite_ok, Summary, _Script, _FullLineNo,
-     _ShellName, _CaseLogDir,
-     _CaseResults, _Details, _Opaque} = CaseRes,
+case_summary([#suite_ok{summary = Summary} | Rest], OldSummary) ->
     NewSummary = lux_utils:summary(OldSummary, Summary),
     case_summary(Rest, NewSummary);
 case_summary([], Summary) ->
@@ -435,21 +444,15 @@ merge_config_logs(RelTargetDir, [{FirstSummaryLog, _Res} | _Rest]) ->
     Dir = filename:dirname(FirstSummaryLog),
     FirstConfigLog = filename:join([Dir, ?SUITE_CONFIG_LOG]),
     {ok, ConfigBlob} = file:read_file(FirstConfigLog),
-    ConfigBins = binary:split(ConfigBlob, <<"\n">>, [global]),
-    ConfigProps = lux_log:split_config(ConfigBins),
+    SummaryConfigBins = binary:split(ConfigBlob, <<"\n">>, [global]),
+    ConfigProps = lux_log:split_config(SummaryConfigBins),
 
     RunDir = lux_log:find_config(<<"run_dir">>, ConfigProps, no_config),
-    OrigRunDir = lux_log:find_config(<<"orig_run_dir">>, ConfigProps, RunDir),
-    RunLogDir = lux_log:find_config(<<"log_dir">>, ConfigProps, RunDir),
-    OrigLogDir =
-        lux_log:find_config(<<"orig_log_dir">>, ConfigProps, RunLogDir),
-
     BinAbsTargetDir = ?l2b(lux_utils:normalize_filename(RelTargetDir)),
     NewProps =
         [{<<"run_dir">>, BinAbsTargetDir},
-         {<<"orig_run_dir">>, OrigRunDir},
-         {<<"log_dir">>, BinAbsTargetDir},
-         {<<"orig_log_dir">>, OrigLogDir}],
+         {<<"log_dir">>, BinAbsTargetDir}],
+
     Replace =
         fun({_Key, no_config}, CP) ->
                 CP;
@@ -458,6 +461,7 @@ merge_config_logs(RelTargetDir, [{FirstSummaryLog, _Res} | _Rest]) ->
         end,
     NewConfigProps = lists:foldl(Replace, ConfigProps, NewProps),
     lux_log:write_config_log(TargetConfigLog, NewConfigProps),
+    OrigRunDir = RunDir,
     {?b2l(RunDir), ?b2l(OrigRunDir)}.
 
 -spec annotate_log(boolean(), filename(), opts()) ->
@@ -568,12 +572,16 @@ annotate_final_summary_log(R, Summary, HtmlPrio, SummaryLog, SuiteResults) ->
                             io:format("\nfile://~s\n",
                                       [SummaryLog ++ ".html"])
                     end,
-                    {run_ok, Summary, SummaryLog, SuiteResults};
+                    #run_ok{summary = Summary,
+                            summary_log = SummaryLog,
+                            suite_results = SuiteResults};
                 {error, File, ReasonStr} ->
-                    {run_error, File, ReasonStr}
+                    #run_error{file = File, reason = ?l2b(ReasonStr)}
             end;
         true ->
-            {run_ok, Summary, SummaryLog, SuiteResults}
+            #run_ok{summary = Summary,
+                    summary_log = SummaryLog,
+                    suite_results = SuiteResults}
     end.
 
 compute_files(R, LogBase) ->
@@ -627,11 +635,9 @@ filter_rerun_files(R, InitialRes) ->
     Filter =
         fun(IR) ->
                 case IR of
-                    {suite_ok, Summary, Script, _FullLineNo,
-                     _ShellName, _CaseLogDir,
-                     _CaseResults, _Details, _Opaque} ->
+                    #suite_ok{summary = Summary, file = Script} ->
                         Return(Summary, Script);
-                    {suite_error, Script, _FullLineNo, _ReasonBin} ->
+                    #suite_error{file = Script} ->
                         Return(error, Script)
                 end
         end,
@@ -742,9 +748,9 @@ check_file({Tag, File}, ReRun) ->
                 true ->
                     ReRun;
                 false ->
-                    BinErr = ?FF("~p ~s: ~s\n",
+                    ErrBin = ?FF("~p ~s: ~s\n",
                                  [Tag, File, file:format_error(enoent)]),
-                    throw_error(File, BinErr)
+                    throw_error(File, ErrBin)
             end;
         file ->
             case filelib:is_file(File) of
@@ -753,9 +759,9 @@ check_file({Tag, File}, ReRun) ->
 %%              false when ReRun =/= disable ->
 %%                  ReRun;
                 false ->
-                    BinErr = ?FF("~s: ~s \n",
+                    ErrBin = ?FF("~s: ~s \n",
                                  [File, file:format_error(enoent)]),
-                    throw_error(File, BinErr)
+                    throw_error(File, ErrBin)
             end
     end.
 
@@ -789,9 +795,12 @@ run_cases(R, [{SuiteFile, {error=Summary, FileReason}, _P, _LenP} | Scripts],
     io:format("~s:\n", [lux_utils:drop_prefix(SuiteFile)]),
     io:format("\tERROR ~s\n", [ReasonStr]),
     NewSummary = lux_utils:summary(OldSummary, Summary),
-    ListErr = ?l2b(?FF("~s~s: ~s\n",
-                       [?TAG("error"), SuiteFile, ReasonStr])),
-    NewRes = {suite_error, SuiteFile, "0", ListErr},
+    ErrBin =
+        ?l2b(?FF( "~s~s: ~s\n",
+                  [?TAG("error"), SuiteFile, ReasonStr])),
+    NewRes = #suite_error{file = SuiteFile,
+                          full_lineno = "0",
+                          reason = ErrBin},
     NewSuiteResults = [NewRes | SuiteResults],
     run_cases(R, Scripts, NewSummary, NewSuiteResults, Max, CC+1, List, Opaque);
 run_cases(R, [{SuiteFile, {error, FileReason}, P, LenP} | Scripts],
@@ -804,10 +813,10 @@ run_cases(R, [{SuiteFile, {error, FileReason}, P, LenP} | Scripts],
 %%           OldSummary, SuiteResults, Max, CC, List, Opaque) ->
 %%     init_case_rlog(R, P, SuiteFile),
 %%     ReasonStr = file:format_error(FileReason),
-%%     ListErr =
+%%     ErrStr =
 %%         double_rlog(R, "~s~s: ~s\n",
 %%                     [?TAG("error"), SuiteFile, ReasonStr]),
-%%     NewRes = {error, SuiteFile, ListErr},
+%%     NewRes = {error, SuiteFile, ErrStr},
 %%     NewSuiteResults = [NewRes | SuiteResults],
 %%     ?TRACE_ME(70, suite, 'case', SuiteFile, []),
 %%     tap_case_begin(R, SuiteFile),
@@ -893,8 +902,15 @@ run_cases(OrigR, [{SuiteFile, {ok, AbsScript}, P, LenP} | Scripts],
                          FullLineNo, no_shell,
                          ?b2l(SkipReason), <<>>),
             NewSummary = lux_utils:summary(OldSummary, Summary),
-            NewRes = {suite_ok, Summary, AbsScript2, FullLineNo, no_shell,
-                      NewR#rstate.log_dir, [], SkipReason, []},
+            NewRes =
+                #suite_ok{summary = Summary,
+                          file = AbsScript2,
+                          full_lineno = FullLineNo,
+                          shell_name = no_shell,
+                          case_log_dir = NewR#rstate.log_dir,
+                          case_results = [],
+                          details = SkipReason,
+                          opaque = []},
             NewSuiteResults = [NewRes | SuiteResults],
             ParseWarnings = NewR#rstate.warnings,
             AllWarnings = OrigR#rstate.warnings ++ ParseWarnings,
@@ -918,7 +934,9 @@ run_cases(OrigR, [{SuiteFile, {ok, AbsScript}, P, LenP} | Scripts],
             io:format("~s:\n", [lux_utils:drop_prefix(AbsScript)]),
             io:format("\tERROR ~s\n", [ErrorBin]),
             MainFile = lux_utils:pretty_filename(RevMainFile),
-            NewRes = {suite_error, MainFile, FullLineNo, ErrorBin2},
+            NewRes = #suite_error{file =  MainFile,
+                                  full_lineno = FullLineNo,
+                                  reason = ErrorBin2},
             NewSuiteResults = [NewRes | SuiteResults],
             NewWarnings = ErrR#rstate.warnings,
             AllWarnings = OrigR#rstate.warnings ++ NewWarnings,
@@ -950,7 +968,9 @@ run_cases(OrigR, [{SuiteFile, {ok, AbsScript}, P, LenP} | Scripts],
             NewWarnings = ErrR#rstate.warnings,
             AllWarnings = OrigR#rstate.warnings ++ NewWarnings,
             NewSummary = lux_utils:summary(OldSummary, Summary),
-            NewRes = {suite_error, MainFile, FullLineNo, ErrorBin2},
+            NewRes = #suite_error{file = MainFile,
+                                  full_lineno = FullLineNo,
+                                  reason = ErrorBin2},
             NewSuiteResults = [NewRes | SuiteResults],
             run_cases(OrigR#rstate{warnings = AllWarnings},
                       Scripts, NewSummary, NewSuiteResults,
@@ -1019,23 +1039,39 @@ run_execute(OrigR, NewR,
                                     Opts, Opaque),
     SkipReason = "",
     case CaseRes of
-        {case_ok, Summary, _, FullLineNo,
-         ShellName, CaseLogDir,
-         RunWarnings, UnstableWarnings,
-         CaseResults, Details, NewOpaque} ->
+        #case_ok{outcome = Summary,
+                 file = _,
+                 full_lineno = FullLineNo,
+                 shell_name = ShellName,
+                 case_log_dir = CaseLogDir,
+                 run_warnings = RunWarnings,
+                 unstable_warnings = UnstableWarnings,
+                 results = CaseResults,
+                 details = Details,
+                 opaque = NewOpaque} ->
             NewRes =
-                {suite_ok, Summary, AbsScript, FullLineNo,
-                 ShellName, CaseLogDir,
-                 CaseResults, Details, Opaque},
+                #suite_ok{summary = Summary,
+                          file = AbsScript,
+                          full_lineno = FullLineNo,
+                          shell_name = ShellName,
+                          case_log_dir = CaseLogDir,
+                          case_results = CaseResults,
+                          details = Details,
+                          opaque = Opaque},
             NewScripts = Scripts;
-        {case_error, MainFile, FullLineNo, CaseLogDir,
-         RunWarnings, UnstableWarnings, ReasonBin} ->
+        #case_error{file = MainFile,
+                    full_lineno = FullLineNo,
+                    case_log_dir = CaseLogDir,
+                    run_warnings = RunWarnings,
+                    unstable_warnings = UnstableWarnings,
+                    reason = ReasonBin} ->
             Summary = error,
             NewOpaque = Opaque,
             ShellName = no_shell,
             NewRes =
-                {suite_error, MainFile,
-                 FullLineNo, ReasonBin},
+                #suite_error{file = MainFile,
+                             full_lineno = FullLineNo,
+                             reason = ReasonBin},
             Details = ReasonBin,
             NewScripts =
                 case ReasonBin of
@@ -1118,14 +1154,18 @@ write_results(#rstate{mode=Mode, summary_log=SummaryLog},
        Mode =:= doc      orelse
        Mode =:= dump     orelse
        Mode =:= expand ->
-    {run_ok, Summary, SummaryLog, SuiteResults};
+    #run_ok{summary = Summary,
+            summary_log = SummaryLog,
+            suite_results = SuiteResults};
 write_results(#rstate{progress=Progress,
                       summary_log=SummaryLog,
                       warnings=Warnings},
               Summary, SuiteResults) when is_list(SummaryLog) ->
     lux_log:write_results(Progress, SummaryLog, Summary,
                           SuiteResults, Warnings),
-    {run_ok, Summary, SummaryLog, SuiteResults}.
+    #run_ok{summary = Summary,
+            summary_log = SummaryLog,
+            suite_results = SuiteResults}.
 
 print_results(#rstate{progress=Progress,warnings=Warnings},
               Summary, SuiteResults) ->
@@ -1434,23 +1474,31 @@ double_rlog(#rstate{progress = Progress, log_fd = Fd}, Format, Args) ->
 %%             lux_log:double_write(Progress, Fd, {ResIoList, ConIoList})
 %%     end.
 
-init_case_rlog(#rstate{progress = Progress, log_fd = Fd},
+init_case_rlog(#rstate{progress = Progress, log_fd = Fd, log_dir = LogDir},
                RelScript, AbsScript) ->
-    Tag = ?TAG("test case"),
-    AbsIoList = ?FF("\n~s~s\n", [Tag, AbsScript]),
+    {ok, RunDir} = file:get_cwd(),
+    TestCase = "test case",
+    Props =
+        [
+         {TestCase, AbsScript},
+         {"run dir", RunDir},
+         {"log dir", LogDir}
+        ],
+    IoList = ["\n",
+              [?FF("~s~s\n", [?TAG(Tag), Str]) || {Tag, Str} <- Props]],
     case Fd of
         undefined ->
-            ?l2b(AbsIoList);
+            ?l2b(IoList);
         _ ->
-            AbsBin = lux_log:safe_write(Fd, AbsIoList),
+            Bin = lux_log:safe_write(Fd, IoList),
             case Progress of
                 silent ->
                     ok;
                 _ ->
-                    RelIoList = ?FF("\n~s~s\n", [Tag, RelScript]),
+                    RelIoList = ?FF("\n~s~s\n", [?TAG(TestCase), RelScript]),
                     lux_log:safe_write(undefined, ?l2b(RelIoList))
             end,
-            AbsBin
+            Bin
     end.
 
 prefixed_rel_script(R, AbsScript) ->

@@ -450,7 +450,7 @@ premature_stop(I, StopRes) ->
         %% io:format("\nSTOP ~p\n", [StopRes]),
         %% io:format("\nCLEAN ~p\n", [CleanupReason]),
         %% I2#istate{mode = mode(OldMode, stopping),
-        %%           ßcleanup_reason = CleanupReason};
+        %%           cleanup_reason = CleanupReason};
         stopping ->
             %% Shutdown has already been sent to the normal shells,
             %% continue to collect their states as well as cleanup shells.
@@ -559,51 +559,36 @@ dispatch_cmd(I,
         expect when is_atom(Arg) ->
             shell_eval(I, Cmd);
         expect when is_tuple(Arg) ->
-            case compile_regexp(I, Cmd, Arg) of
-                {ok, Cmd2} ->
-                    shell_eval(I#istate{latest_cmd = Cmd2}, Cmd2);
-                {bad_regexp, I2} ->
-                    I2
-            end;
+            Cmd2 = compile_regexp(I, Cmd, Arg),
+            shell_eval(I#istate{latest_cmd = Cmd2}, Cmd2);
         fail ->
-            case compile_regexp(I, Cmd, Arg) of
-                {ok, Cmd2} ->
-                    ShellPos = #shell.fail_pattern,
-                    {_ExpectTag, RegExp} =
-                        lux_shell:extract_regexp(Cmd2#cmd.arg),
-                    RegExp2 = opt_regexp(RegExp),
-                    change_shell_var(I, ShellPos, RegExp2, Cmd2);
-                {bad_regexp, I2} ->
-                    I2
-            end;
+            Cmd2 = compile_regexp(I, Cmd, Arg),
+            {_ExpectTag, RegExp} = lux_shell:extract_regexp(Cmd2#cmd.arg),
+            OptRegExp = opt_regexp(RegExp),
+            ShellPos = #shell.fail_regexp,
+            change_shell_var(I, ShellPos, OptRegExp, Cmd2);
         success ->
-            case compile_regexp(I, Cmd, Arg) of
-                {ok, Cmd2} ->
-                    ShellPos = #shell.success_pattern,
-                    {_ExpectTag, RegExp} =
-                        lux_shell:extract_regexp(Cmd2#cmd.arg),
-                    RegExp2 = opt_regexp(RegExp),
-                    change_shell_var(I, ShellPos, RegExp2, Cmd2);
-                {bad_regexp, I2} ->
-                    I2
-            end;
+            Cmd2 = compile_regexp(I, Cmd, Arg),
+            {_ExpectTag, RegExp} = lux_shell:extract_regexp(Cmd2#cmd.arg),
+            OptRegExp = opt_regexp(RegExp),
+            ShellPos = #shell.success_regexp,
+            change_shell_var(I, ShellPos, OptRegExp, Cmd2);
         break ->
-            case compile_regexp(I, Cmd, Arg) of
-                {ok, _Cmd2} when I#istate.loop_stack =:= [] ->
+            Cmd2 = compile_regexp(I, Cmd, Arg),
+            if
+                I#istate.loop_stack =:= [] ->
                     Reason = <<"The break command must be executed"
                                " in context of a loop">>,
                     handle_error(I, Reason);
-                {ok, Cmd2} ->
-                    shell_eval(I#istate{latest_cmd = Cmd2}, Cmd2);
-                {bad_regexp, I2} ->
-                    I2
+                true ->
+                    shell_eval(I#istate{latest_cmd = Cmd2}, Cmd2)
             end;
         sleep ->
             case parse_int(I, Arg, Cmd) of
                 {ok, Secs} ->
                     Cmd2 = Cmd#cmd{arg = Secs},
                     shell_eval(I#istate{latest_cmd = Cmd2}, Cmd2);
-                {bad_int, I2} ->
+                {error, I2} ->
                     I2
             end;
         progress ->
@@ -624,25 +609,25 @@ dispatch_cmd(I,
                     no_such_var(I, Cmd, LineNo, BadName)
             end;
         change_timeout ->
-            ShellPos = #shell.match_timeout,
-            case Arg of
-                "" ->
-                    Millis = I#istate.default_timeout,
+            MaybeMillis =
+                case Arg of
+                    default ->
+                        {ok, I#istate.default_timeout};
+                    SecsStr ->
+                        case parse_int(I, SecsStr, Cmd) of
+                            {ok, Secs} ->
+                                {ok, Secs*?ONE_SEC};
+                            Other ->
+                                Other
+                        end
+                end,
+            case MaybeMillis of
+                {ok, Millis} ->
                     Cmd2 = Cmd#cmd{arg = Millis},
+                    ShellPos = #shell.match_timeout,
                     change_shell_var(I, ShellPos, Millis, Cmd2);
-                "infinity" ->
-                    Infinity = infinity,
-                    Cmd2 = Cmd#cmd{arg = Infinity},
-                    change_shell_var(I, ShellPos, Infinity, Cmd2);
-                SecsStr ->
-                    case parse_int(I, SecsStr, Cmd) of
-                        {ok, Secs} ->
-                            Millis = Secs*?ONE_SEC,
-                            Cmd2 = Cmd#cmd{arg = Millis},
-                            change_shell_var(I, ShellPos, Millis, Cmd2);
-                        {bad_int, I2} ->
-                            I2
-                    end
+                {error, I2} ->
+                    I2
             end;
         change_pattern_mode ->
             PatternMode =
@@ -948,25 +933,21 @@ macro_vars(I, _Names, _Vals, #cmd{arg = {invoke, Name, _}, lineno = LineNo}) ->
     {bad_vars, handle_error(I, Reason)}.
 
 compile_regexp(_I, Cmd, reset) ->
-    {ok, Cmd};
+    Cmd;
 compile_regexp(I, Cmd, {endshell, RegExpOper, RegExp}) ->
-    case compile_regexp(I, Cmd, {regexp, RegExpOper, RegExp}) of
-        {ok, Cmd2} ->
-            {mp, RegExpOper, RegExp2, MP2, _Multi} = Cmd2#cmd.arg,
-            {ok, Cmd2#cmd{arg = {endshell, RegExpOper, RegExp2, MP2}}};
-        {bad_regexp, I2} ->
-            {bad_regexp, I2}
-    end;
+    Cmd2 = compile_regexp(I, Cmd, {regexp, RegExpOper, RegExp}),
+    {mp, RegExpOper, RegExp2, MP2, _Multi} = Cmd2#cmd.arg,
+    Cmd2#cmd{arg = {endshell, RegExpOper, RegExp2, MP2}};
 compile_regexp(_I, Cmd, {verbatim, _RegExpOper, _Verbatim}) ->
-    {ok, Cmd};
+    Cmd;
 compile_regexp(_I, Cmd, {mp, _RegExpOper, _RegExp, _MP, _Multi}) ->
-    {ok, Cmd};
+    Cmd;
 compile_regexp(I, Cmd, {template, RegExpOper, Template}) ->
     case safe_expand_vars(I, Template) of
         {ok, Verbatim} ->
-            {ok, Cmd#cmd{arg = {verbatim, RegExpOper, Verbatim}}};
+            Cmd#cmd{arg = {verbatim, RegExpOper, Verbatim}};
         {no_such_var, BadName} ->
-            {bad_regexp, no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)}
+            no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)
     end;
 compile_regexp(I, Cmd, {regexp, RegExpOper, RegExp}) ->
     case safe_expand_vars(I, RegExp) of
@@ -974,14 +955,15 @@ compile_regexp(I, Cmd, {regexp, RegExpOper, RegExp}) ->
             RegExp3 = lux_utils:normalize_match_regexp(RegExp2),
             case re:compile(RegExp3, ?RE_COMPILE_OPTS) of
                 {ok, MP3} ->
-                    {ok, Cmd#cmd{arg = {mp, RegExpOper, RegExp3, MP3, []}}};
+                    Cmd#cmd{arg = {mp, RegExpOper, RegExp3, MP3, []}};
                 {error, {Reason, _Pos}} ->
-                    BinErr = ?l2b(["Syntax error: ", Reason,
+
+                    ErrBin = ?l2b(["Syntax error: ", Reason,
                                    " in regexp '", RegExp3, "'"]),
-                    {bad_regexp, handle_error(I, BinErr)}
+                    handle_error(I, ErrBin)
             end;
         {no_such_var, BadName} ->
-            {bad_regexp, no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)}
+            no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)
     end.
 
 expand_send(I, Cmd, Arg) ->
@@ -1019,19 +1001,21 @@ make_warning(#istate{orig_file = File,
 
 parse_int(I, Chars, Cmd) ->
     case safe_expand_vars(I, Chars) of
+        {ok, "infinity"} ->
+            {ok, infinity};
         {ok, Chars2} ->
             try
                 {ok, list_to_integer(Chars2)}
             catch
                 error:_ ->
-                    BinErr =
+                    ErrBin =
                         ?l2b(["Syntax error at line ",
                               ?i2l(Cmd#cmd.lineno),
                               ": '", Chars2, "' integer expected"]),
-                    {bad_int, handle_error(I, BinErr)}
+                    {error, handle_error(I, ErrBin)}
             end;
         {no_such_var, BadName} ->
-            {bad_int, no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)}
+            {error, no_such_var(I, Cmd, Cmd#cmd.lineno, BadName)}
     end.
 
 eval_loop(OldI, #cmd{arg = {loop,Name,Items,First,Last,Body}} = LoopCmd) ->
@@ -1696,10 +1680,10 @@ expand_vars(#istate{active_shell  = Shell,
             MissingVar) ->
     case Shell of
         #shell{vars = LocalVars,
-               match_timeout = Millis,
-               pattern_mode = PatternMode,
-               fail_pattern = FailPattern,
-               success_pattern = SuccessPattern} ->
+               match_timeout  = Millis,
+               pattern_mode   = PatternMode,
+               fail_regexp    = FailRegExp,
+               success_regexp = SuccessRegExp} ->
             Secs =
                 case Millis of
                     infinity -> infinity;
@@ -1712,9 +1696,9 @@ expand_vars(#istate{active_shell  = Shell,
                  lists:flatten("LUX_PATTERN_MODE=",
                                ?FF("~p", [PatternMode])),
                  lists:flatten("LUX_FAIL_PATTERN=",
-                               ?FF("~s", [opt_binary(FailPattern)])),
+                               ?FF("~s", [opt_binary(FailRegExp)])),
                  lists:flatten("LUX_SUCCESS_PATTERN=",
-                               ?FF("~s", [opt_binary(SuccessPattern)]))
+                               ?FF("~s", [opt_binary(SuccessRegExp)]))
                 ];
         no_shell ->
             LocalVars = OptGlobalVars,
@@ -1727,13 +1711,13 @@ expand_vars(#istate{active_shell  = Shell,
 
 opt_binary(OptBin) ->
     case OptBin of
-        undefined               -> <<"">>;
+        no_regexp               -> <<"">>;
         Bin when is_binary(Bin) -> Bin
     end.
 
 opt_regexp(OptRegExp) ->
     case OptRegExp of
-        reset -> undefined;
+        reset                         -> no_regexp;
         RegExp when is_binary(RegExp) -> RegExp
     end.
 

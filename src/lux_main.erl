@@ -488,11 +488,11 @@ run(Opts, Files, PrevLogDir, OrigArgs) ->
         run_ok -> % HTML
             Summary = success,
             ok;
-        {run_ok, Summary, _SummaryLog, _Results} -> % LUX
+        #run_ok{summary = Summary} -> % LUX
             ok;
-        {run_error, undefined, no_input_files} ->
+        no_input_files ->
             Summary = error;
-        {run_error, File, ReasonBin} ->
+        #run_error{file = File, reason = ReasonBin} ->
             io:format("\n\nFATAL ERROR: ~s:\n\t~s\n", [File, ReasonBin]),
             Summary = error
     end,
@@ -512,7 +512,7 @@ validate_html([File | Files], Opts) ->
         ok ->
             validate_html(Files, Opts);
         {error, File, Reason} ->
-            {run_error, File, Reason}
+            #run_error{file = File, reason = Reason}
     end;
 validate_html([], _Opts) ->
     run_ok.

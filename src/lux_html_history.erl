@@ -1292,16 +1292,17 @@ parse_summary_files(Source, RelHtmlDir, RelDir, [Base | Bases],
             {ParseRes, NewWWW} = lux_log:parse_summary_log(SummaryLog, WWW),
             {Acc2, Err2} =
                 case ParseRes of
-                    {ok,_,_,_,_,_} = Res ->
+                    {ok, _Result, _Cases, _ConfigBins, _Ctime,
+                     _RunDir, _LogDir, _EventLogs} = Res ->
                         case lux_log:parse_run_summary(Source,
                                                        SummaryLog,
                                                        Res, Opts) of
-                            {error, F, Reason} ->
-                                io:format("E", []),
-                                {Acc, [{error, F, Reason} | Err]};
                             #run{} = R ->
                                 io:format(".", []),
-                                {[R|Acc], Err}
+                               {[R|Acc], Err};
+                            {error, F, Reason} ->
+                                io:format("E", []),
+                                {Acc, [{error, F, Reason} | Err]}
                         end;
                     {error, F, Reason} ->
                         io:format("E", []),
