@@ -67,7 +67,7 @@
     [progress merge]
     !../bin/lux --html=validate \
                 --merge $merge_dir $new_fail_dir $new_intro_dir
-    [invoke check_status $OK]
+    [invoke check_status $FAIL]
     !cat $merge_dir/lux_summary.log.html | grep examples
     ???orig/case/prefix/../examples/fail.lux
     ???orig/case/prefix/../examples/intro.lux

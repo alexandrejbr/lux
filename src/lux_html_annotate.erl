@@ -141,12 +141,13 @@ annotate_summary_log(IsRecursive, #astate{log_file = AbsSummaryLog} = A,
   when is_list(AbsSummaryLog) ->
     {ParseRes, NewWWW} = lux_log:parse_summary_log(AbsSummaryLog, WWW),
     case ParseRes of
-        {ok, Result, Cases, ConfigSection, _FileInfo, EventLogs} ->
-            {A2, _ConfigProps} = add_astate_config(A, ConfigSection),
+        {ok, Result, Cases, ConfigBins, _Ctime,
+         _SuiteRunDir, _SuiteRunLogDir, EventLogs} ->
+            {A2, _ConfigProps} = add_astate_config(A, ConfigBins),
             Opts = A#astate.opts,
             Transform = wrap_transform(Transform0, Opts),
             Html = html_cases(A2, AbsSummaryLog, Result,
-                              Cases, ConfigSection, Transform),
+                              Cases, ConfigBins, Transform),
             SuiteLogDir = filename:dirname(AbsSummaryLog),
             case IsRecursive of
                 true ->

@@ -23,16 +23,6 @@
 -include_lib("kernel/include/file.hrl").
 -include("lux.hrl").
 
--define(SUMMARY_LOG_VERSION, <<"0.4">>).
--define(EVENT_LOG_VERSION,   <<"0.8">>).
--define(CONFIG_LOG_VERSION,  <<"0.1">>).
--define(RESULT_LOG_VERSION,  <<"0.1">>).
-
--define(SUMMARY_TAG, <<"summary log">>).
--define(EVENT_TAG,   <<"event log">>).
--define(CONFIG_TAG,  <<"config log">>).
--define(RESULT_TAG,  <<"result log">>).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Summary log
 
@@ -137,7 +127,8 @@ do_parse_summary_log(SummaryLog, Sections, NewWWW) ->
     LogDir = filename:dirname(SummaryLog),
     ConfigLog = lux_utils:join(LogDir, ?SUITE_CONFIG_LOG),
     {{ok, RawConfig}, NewWWW} = scan_config(ConfigLog, NewWWW),
-    SummaryConfigBins = parse_config(RawConfig),
+    RawConfig2 = parse_config(RawConfig),
+    SummaryConfigBins = binary:split(RawConfig2, <<"\n">>, [global]),
     ConfigProps = split_config(SummaryConfigBins),
     DefaultRunDir = default_run_dir(),
     SuiteRunDir = ?b2l(find_config(<<"run_dir">>, ConfigProps, DefaultRunDir)),
@@ -267,7 +258,7 @@ split_result2([], Acc) ->
 
 split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
     AllRows = binary:split(Case, <<"\n">>, [global]),
-    {PreResult, RawResult, WR} = find_case_result(AllRows, []),
+    {PreResult, Reason, WR, RawResult} = find_case_result(AllRows, []),
     {C, NewEventLogs} =
         case PreResult of
             [{<<"test case", _/binary>>, RawName}]
@@ -276,49 +267,56 @@ split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
                 {#error_case{name = Name,
                              run_dir = SuiteRunDir,
                              run_log_dir = SuiteRunLogDir,
-                             reason = RawResult,
+                             reason = Reason,
+                             raw_result = RawResult,
                              result = WR},
                  EventLogs};
             [{<<"test case", _/binary>>, RawName},
-             {<<"script", _/binary>>, _},
-             {<<"event log", _/binary>>, RawEventLog}] ->
+             {<<"script", _/binary>>, _} | OptEventLog] ->
+                %% Old style
                 Name = ?b2l(RawName),
-                EventLog = ?b2l(RawEventLog),
-                HtmlLog = EventLog ++ ".html",
-                {#test_case{name = Name,
-                            run_dir = SuiteRunDir,
-                            run_log_dir = SuiteRunLogDir,
-                            event_log = EventLog,
-                            html_log = HtmlLog,
-                            result = WR},
-                 [EventLog|EventLogs]};
+                TC = #test_case{name = Name,
+                                run_dir = SuiteRunDir,
+                                run_log_dir = SuiteRunLogDir,
+                                raw_result = RawResult,
+                                result = WR},
+                opt_add_event_log(OptEventLog, TC, EventLogs);
             [{<<"test case", _/binary>>, RawName},
              {<<"run dir", _/binary>>, RawCaseRunDir},
-             {<<"log dir", _/binary>>, RawCaseRunLogDir},
-             {<<"event log", _/binary>>, RawEventLog}] ->
+             {<<"log dir", _/binary>>, RawCaseRunLogDir} | OptEventLog] ->
                 Name = ?b2l(RawName),
-                EventLog = ?b2l(RawEventLog),
-                HtmlLog = EventLog ++ ".html",
-                {#test_case{name = Name,
-                            run_dir = ?b2l(RawCaseRunDir),
-                            run_log_dir = ?b2l(RawCaseRunLogDir),
-                            event_log = EventLog,
-                            html_log = HtmlLog,
-                            result = WR},
-                 [EventLog|EventLogs]}
+                TC = #test_case{name = Name,
+                                run_dir = ?b2l(RawCaseRunDir),
+                                run_log_dir = ?b2l(RawCaseRunLogDir),
+                                raw_result = RawResult,
+                                result = WR},
+                opt_add_event_log(OptEventLog, TC, EventLogs)
         end,
     split_cases(Cases, SuiteRunDir, SuiteRunLogDir, [C | Acc], NewEventLogs);
 split_cases([], _SuiteRunDir, _SuiteRunLogDir, Acc, EventLogs) ->
     {lists:reverse(Acc), EventLogs}.
 
+opt_add_event_log(OptEventLog, TC, EventLogs) ->
+    case OptEventLog of
+        [] ->
+            {TC#test_case{event_log = "",
+                          html_log = ""},
+             EventLogs};
+        [{<<"event log", _/binary>>, RawEventLog}] ->
+            EventLog = ?b2l(RawEventLog),
+            {TC#test_case{event_log = EventLog,
+                          html_log = EventLog ++ ".html"},
+             [EventLog | EventLogs]}
+    end.
+
 find_case_result([H|T] = Rest, PreAcc) ->
     case binary:split(H, <<": ">>) of
         [<<"result", _/binary>>, RawResult] ->
             Result = parse_result(Rest),
-            {lists:reverse(PreAcc), RawResult, Result};
+            {lists:reverse(PreAcc), RawResult, Result, Rest};
         [<<"warning", _/binary>>, RawResult] ->
             Result = parse_result(Rest),
-            {lists:reverse(PreAcc), RawResult, Result};
+            {lists:reverse(PreAcc), RawResult, Result, Rest};
         [Tag, Val]->
             find_case_result(T, [{Tag, Val} | PreAcc])
     end.
@@ -342,8 +340,7 @@ do_parse_run_summary(Source, SummaryLog, Res, Opts) ->
     case Res of
         {ok, Result, Cases, SummaryConfigBins, Ctime,
          SuiteRunDir, SuiteRunLogDir, _EventLogs} ->
-            ConfigBins = binary:split(SummaryConfigBins, <<"\n">>, [global]),
-            ConfigProps = split_config(ConfigBins),
+            ConfigProps = split_config(SummaryConfigBins),
             StartTime = find_config(<<"start time">>, ConfigProps, Ctime),
             Branch0 = Source#source.branch,
             case Branch0 of
@@ -456,21 +453,20 @@ split_config(ConfigBins) ->
         end,
     lists:zf(Split, ConfigBins).
 
-parse_run_case(NewLogDir, RunDir, RunLogDir,
+parse_run_case(NewLogDir, SuiteRunDir, SuiteRunLogDir,
                StartTime, Branch, Host, ConfigName,
                Suite, RunId, ReposRev,
                #test_case{name = AbsName,
                           run_dir = OrigCaseRunDir,
                           run_log_dir = OrigCaseRunLogDir,
                           event_log = AbsEventLog,
-                          html_log =_,
                           result = CaseRes})
-  when is_binary(NewLogDir), is_binary(RunDir), is_binary(RunLogDir),
+  when is_binary(NewLogDir), is_list(SuiteRunDir), is_list(SuiteRunLogDir),
        is_list(AbsName), is_list(AbsEventLog) ->
-    RelEventLog0 = lux_utils:drop_prefix(OrigCaseRunLogDir, ?l2b(AbsEventLog)),
-    RelEventLog = lux_utils:drop_prefix(RunLogDir, RelEventLog0),
-    RelNameBin0 = lux_utils:drop_prefix(OrigCaseRunDir, ?l2b(AbsName)),
-    RelNameBin = lux_utils:drop_prefix(RunDir, RelNameBin0),
+    RelEventLog0 = lux_utils:drop_prefix(OrigCaseRunLogDir, AbsEventLog),
+    RelEventLog = lux_utils:drop_prefix(OrigCaseRunLogDir, RelEventLog0),
+    RelName0 = lux_utils:drop_prefix(OrigCaseRunDir, AbsName),
+    RelNameBin = ?l2b(lux_utils:drop_prefix(SuiteRunDir, RelName0)),
     {RunWarnings, RunResult} = run_result(CaseRes),
     #run{test = <<Suite/binary, ":", RelNameBin/binary>>,
          id = RunId,
@@ -481,22 +477,22 @@ parse_run_case(NewLogDir, RunDir, RunLogDir,
          branch = Branch,
          hostname = Host,
          config_name = ConfigName,
-         run_dir = OrigCaseRunDir,
-         run_log_dir = OrigCaseRunLogDir,
-         new_log_dir = undefined,
+         run_dir = ?l2b(OrigCaseRunDir),
+         run_log_dir = ?l2b(OrigCaseRunLogDir),
+         new_log_dir = NewLogDir,
          repos_rev = ReposRev,
          runs = []};
-parse_run_case(NewLogDir, RunDir, RunLogDir,
+parse_run_case(NewLogDir, SuiteRunDir, SuiteRunLogDir,
                StartTime, Branch, Host, ConfigName,
                Suite, RunId, ReposRev,
                #error_case{name = AbsName,
                            run_dir = OrigCaseRunDir,
                            run_log_dir = OrigCaseRunLogDir,
                            reason = Res})
-  when is_binary(NewLogDir), is_binary(RunDir), is_binary(RunLogDir),
+  when is_binary(NewLogDir), is_list(SuiteRunDir), is_list(SuiteRunLogDir),
        is_list(AbsName) ->
-    RelNameBin0 = lux_utils:drop_prefix(OrigCaseRunDir, ?l2b(AbsName)),
-    RelNameBin = lux_utils:drop_prefix(RunDir, RelNameBin0),
+    RelName0 = lux_utils:drop_prefix(OrigCaseRunDir, AbsName),
+    RelNameBin = ?l2b(lux_utils:drop_prefix(SuiteRunDir, RelName0)),
     {RunWarnings, RunResult} = run_result(Res),
     #run{test = <<Suite/binary, ":", RelNameBin/binary>>,
          id = RunId,
@@ -506,9 +502,9 @@ parse_run_case(NewLogDir, RunDir, RunLogDir,
          branch = Branch,
          hostname = Host,
          config_name = ConfigName,
-         run_dir = OrigCaseRunDir,
-         run_log_dir = OrigCaseRunLogDir,
-         new_log_dir = undefined,
+         run_dir = ?l2b(OrigCaseRunDir),
+         run_log_dir = ?l2b(OrigCaseRunLogDir),
+         new_log_dir = NewLogDir,
          repos_rev = ReposRev,
          runs = []}.
 

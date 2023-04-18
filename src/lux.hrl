@@ -46,6 +46,16 @@
 -define(CASE_CONFIG_LOG, ".config.log").
 -define(CASE_EXTRA_LOGS, ".extra.logs").
 
+-define(SUMMARY_LOG_VERSION, <<"0.4">>).
+-define(EVENT_LOG_VERSION,   <<"0.8">>).
+-define(CONFIG_LOG_VERSION,  <<"0.1">>).
+-define(RESULT_LOG_VERSION,  <<"0.1">>).
+
+-define(SUMMARY_TAG, <<"summary log">>).
+-define(EVENT_TAG,   <<"event log">>).
+-define(CONFIG_TAG,  <<"config log">>).
+-define(RESULT_TAG,  <<"result log">>).
+
 -define(DEFAULT_LOG, <<"unknown">>).
 -define(DEFAULT_HOSTNAME, <<"no_host">>).
 -define(DEFAULT_CONFIG_NAME, <<"no_config">>).
@@ -276,17 +286,19 @@
 
 -record(test_case,
         {name        :: string(),
-         run_dir     :: file:filename(),
-         run_log_dir :: file:filename(),
-         event_log   :: file:filename(),
-         html_log    :: file:filename(),
+         run_dir     :: file:filename(), % string()
+         run_log_dir :: file:filename(), % string()
+         event_log   :: file:filename(), % string()
+         html_log    :: file:filename(), % string()
+         raw_result  :: binary(),
          result      :: #warnings_and_result{}}).
 
 -record(error_case,
         {name        :: string(),
-         run_dir     :: file:filename(),
-         run_log_dir :: file:filename(),
+         run_dir     :: file:filename(), % string()
+         run_log_dir :: file:filename(), % string()
          reason      :: binary(),
+         raw_result  :: binary(),
          result      :: #warnings_and_result{}}).
 
 -record(file_lineno,
@@ -304,7 +316,7 @@
 
 -record(run_ok,
         {summary       :: summary(),
-         summary_log   :: string(),
+         summary_log   :: file:filename(), % string()
          suite_results :: [#result{}]}).
 
 -record(run_error,
@@ -313,25 +325,29 @@
 
 -record(suite_ok,
         {summary           :: summary(),
-         file              :: string(),
-         full_lineno       :: string(),
          shell_name        :: no_shell | string(),
-         case_log_dir      :: string(),
+         file              :: file:filename(), % string(),
+         full_lineno       :: string(),
+         run_dir           :: file:filename(), % string()
+         run_log_dir       :: file:filename(), % string()
+         case_log_dir      :: file:filename(), % string()
          case_results      :: [#result{}],
          details           :: binary(),
          opaque            :: proplists:proplist()}).
 
 -record(suite_error,
-        {file        :: string(),
-         full_lineno :: string(),
-         reason      :: binary()}).
+        {file              :: file:filename(), % string(),
+         full_lineno       :: string(),
+         run_dir           :: file:filename(), % string()
+         run_log_dir       :: file:filename(), % string()
+         reason            :: binary()}).
 
 -record(case_ok,
         {outcome           :: success | warning | fail,
-         file              :: string(),
-         full_lineno       :: string(),
          shell_name        :: no_shell | string(),
-         case_log_dir      :: string(),
+         file              :: file:filename(), % string(),
+         full_lineno       :: string(),
+         case_log_dir      :: file:filename(), % string(),
          run_warnings      :: [#warning{}],
          unstable_warnings :: [#warning{}],
          results           :: [#result{}],
@@ -339,9 +355,9 @@
          opaque            :: proplists:proplist()}).
 
 -record(case_error,
-        {file              :: string(),
+        {file              :: file:filename(), % string(),
          full_lineno       :: string(),
-         case_log_dir      :: string(),
+         case_log_dir      :: file:filename(), % string(),
          run_warnings      :: [#warning{}],
          unstable_warnings :: [#warning{}],
          reason            :: binary()}).
