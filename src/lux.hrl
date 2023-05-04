@@ -286,6 +286,7 @@
 
 -record(test_case,
         {name        :: string(),
+         case_prefix :: string(),
          run_dir     :: file:filename(), % string()
          run_log_dir :: file:filename(), % string()
          event_log   :: file:filename(), % string()
@@ -295,6 +296,7 @@
 
 -record(error_case,
         {name        :: string(),
+         case_prefix :: string(),
          run_dir     :: file:filename(), % string()
          run_log_dir :: file:filename(), % string()
          reason      :: binary(),

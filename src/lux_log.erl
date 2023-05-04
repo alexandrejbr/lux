@@ -133,9 +133,11 @@ do_parse_summary_log(SummaryLog, Sections, NewWWW) ->
     DefaultRunDir = default_run_dir(),
     SuiteRunDir = ?b2l(find_config(<<"run_dir">>, ConfigProps, DefaultRunDir)),
     SuiteRunLogDir = ?b2l(find_config(<<"log_dir">>, ConfigProps, SuiteRunDir)),
+    CasePrefix = ?b2l(find_config(<<"case_prefix">>, ConfigProps, "")),
     {{ok, Result}, NewWWW} = parse_summary_result(LogDir, NewWWW),
     {Cases, EventLogs} =
-        split_cases(Sections, SuiteRunDir, SuiteRunLogDir, [], []),
+        split_cases(Sections, SuiteRunDir, SuiteRunLogDir, CasePrefix,
+                    [], []),
     Ctime =
         case lux_utils:is_url(SummaryLog) of
             true ->
@@ -256,7 +258,8 @@ split_result2([Heading | Lines], Acc) ->
 split_result2([], Acc) ->
     Acc. % Return in reverse order (most important first)
 
-split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
+split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, CasePrefix,
+            Acc, EventLogs) ->
     AllRows = binary:split(Case, <<"\n">>, [global]),
     {PreResult, Reason, WR, RawResult} = find_case_result(AllRows, []),
     {C, NewEventLogs} =
@@ -265,6 +268,7 @@ split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
               when WR#warnings_and_result.warnings =:= [] ->
                 Name = ?b2l(RawName),
                 {#error_case{name = Name,
+                             case_prefix = CasePrefix,
                              run_dir = SuiteRunDir,
                              run_log_dir = SuiteRunLogDir,
                              reason = Reason,
@@ -276,6 +280,7 @@ split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
                 %% Old style
                 Name = ?b2l(RawName),
                 TC = #test_case{name = Name,
+                                case_prefix = CasePrefix,
                                 run_dir = SuiteRunDir,
                                 run_log_dir = SuiteRunLogDir,
                                 raw_result = RawResult,
@@ -286,14 +291,17 @@ split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, Acc, EventLogs) ->
              {<<"log dir", _/binary>>, RawCaseRunLogDir} | OptEventLog] ->
                 Name = ?b2l(RawName),
                 TC = #test_case{name = Name,
+                                case_prefix = CasePrefix,
                                 run_dir = ?b2l(RawCaseRunDir),
                                 run_log_dir = ?b2l(RawCaseRunLogDir),
                                 raw_result = RawResult,
                                 result = WR},
                 opt_add_event_log(OptEventLog, TC, EventLogs)
         end,
-    split_cases(Cases, SuiteRunDir, SuiteRunLogDir, [C | Acc], NewEventLogs);
-split_cases([], _SuiteRunDir, _SuiteRunLogDir, Acc, EventLogs) ->
+    split_cases(Cases, SuiteRunDir, SuiteRunLogDir, CasePrefix,
+                [C | Acc], NewEventLogs);
+split_cases([], _SuiteRunDir, _SuiteRunLogDir, _CasePrefix,
+            Acc, EventLogs) ->
     {lists:reverse(Acc), EventLogs}.
 
 opt_add_event_log(OptEventLog, TC, EventLogs) ->
