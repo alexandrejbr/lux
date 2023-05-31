@@ -249,21 +249,24 @@ flatten_summary_results({ok, _ResSummary, Cases, _SummaryConfigBins, _Ctime,
                           opaque = []}
         end,
     Fun =
-        fun(Script,
+        fun(AbsScript,
             #warnings_and_result{warnings = _, result = Summary},
             CaseRunDir,
             CaseRunLogDir) ->
                 case Summary of
                     success ->
-                        Init(Summary, Script, "0", CaseRunDir, CaseRunLogDir);
+                        Init(Summary, AbsScript, "0",
+                             CaseRunDir, CaseRunLogDir);
                     skip ->
-                        Init(Summary, Script, "0", CaseRunDir, CaseRunLogDir);
+                        Init(Summary, AbsScript, "0",
+                             CaseRunDir, CaseRunLogDir);
                     warning ->
-                        Init(Summary, Script, "0", CaseRunDir, CaseRunLogDir);
+                        Init(Summary, AbsScript, "0",
+                             CaseRunDir, CaseRunLogDir);
                     {warning, _FullLineNo, _SN, _ET, _E, _A, _D} ->
-                        Init(warning, Script, "0");
+                        Init(warning, AbsScript, "0");
                     {error_line, RawLineNo, ReasonBin} ->
-                        #suite_error{file =  Script,
+                        #suite_error{file =  AbsScript,
                                      full_lineno = ?b2l(RawLineNo),
                                      run_dir = CaseRunDir,
                                      run_log_dir = CaseRunLogDir,
@@ -271,36 +274,36 @@ flatten_summary_results({ok, _ResSummary, Cases, _SummaryConfigBins, _Ctime,
                     {error, [ReasonBin]} ->
                         case binary:split(ReasonBin, <<": ">>, [global]) of
                             [_, <<"Syntax error at line ", N/binary>>, _] ->
-                                #suite_error{file =  Script,
+                                #suite_error{file =  AbsScript,
                                              full_lineno = ?b2l(N),
                                              run_dir = CaseRunDir,
                                              run_log_dir = CaseRunLogDir,
                                              reason = ReasonBin};
                             _ ->
-                                #suite_error{file = Script,
+                                #suite_error{file = AbsScript,
                                              full_lineno = "0",
                                              run_dir = CaseRunDir,
                                              run_log_dir = CaseRunLogDir,
                                              reason = ReasonBin}
                         end;
                     {error, ReasonBin} ->
-                        #suite_error{file = Script,
+                        #suite_error{file = AbsScript,
                                      full_lineno = "0",
                                      run_dir = CaseRunDir,
                                      run_log_dir = CaseRunLogDir,
                                      reason = ReasonBin};
                     {fail, RawLineNo, _SN, _ET, _E, _A, _D} ->
-                        Init(fail, Script, ?b2l(RawLineNo),
+                        Init(fail, AbsScript, ?b2l(RawLineNo),
                              CaseRunDir, CaseRunLogDir)
                 end
         end,
-    [Fun(Script, Res, CaseRunDir, CaseRunLogDir) ||
-        #test_case{name = Script,
-                   run_dir = CaseRunDir,
-                   run_log_dir = CaseRunLogDir,
-                   event_log = _,
-                   html_log = _,
-                   result = Res} <- Cases];
+    [Fun(Name, Res, CaseRunDir, CaseRunLogDir) ||
+        #run_case{name = Name,
+                  run_dir = CaseRunDir,
+                  run_log_dir = CaseRunLogDir,
+                  event_log = _,
+                  html_log = _,
+                  result = Res} <- Cases];
 flatten_summary_results({error, _File, _Reason}) ->
     [].
 
@@ -426,13 +429,13 @@ merge_summary_logs(RelTargetDir, [], Acc) ->
 
 case_to_summary(AbsTargetDir,
                 Rel,
-                #test_case{name = Name,
-                           run_dir = RunDir,
-                           run_log_dir = RunLogDir,
-                           event_log = EventLog,
-                           html_log = _HtmlLog,
-                           raw_result = RawResult,
-                           result = _WR}) ->
+                #run_case{name = Name,
+                          run_dir = RunDir,
+                          run_log_dir = RunLogDir,
+                          event_log = EventLog,
+                          html_log = _HtmlLog,
+                          raw_result = RawResult,
+                          result = _WR}) ->
     RelEventLog = lux_utils:drop_prefix(RunLogDir, EventLog),
     AbsEventLog = filename:join([AbsTargetDir, Rel, RelEventLog]),
     Props =
@@ -536,7 +539,8 @@ merge_config_logs(AbsTargetDir, [{FirstSummaryLog, _Res, _DeepRes} | _Rest]) ->
           ok | error().
 
 annotate_log(IsRecursive, LogFile, Opts) ->
-    do_annotate_log(IsRecursive, LogFile, Opts, []).
+    Transform = [],
+    do_annotate_log(IsRecursive, LogFile, Opts, Transform).
 
 do_annotate_log(IsRecursive, LogFile, Opts, Transform) ->
     DefaultDir = filename:dirname(LogFile),
@@ -607,7 +611,8 @@ annotate_tmp_summary_log(R, Summary, NextScript) ->
             SummaryLog = R#rstate.summary_log,
             TmpLog = SummaryLog ++ ".tmp",
             ok = file:sync(R#rstate.log_fd), % Flush summary log
-            Res = annotate_log(false, TmpLog, NoHtmlOpts),
+            Transform = [],
+            Res = do_annotate_log(false, TmpLog, NoHtmlOpts, Transform),
             case Res of
                 ok ->
                     TmpHtml =  TmpLog ++ ".html",
@@ -631,7 +636,8 @@ annotate_final_summary_log(R, Summary, HtmlPrio, SummaryLog, SuiteResults) ->
         R#rstate.mode =/= expand ->
             Opts = [{case_prefix, R#rstate.case_prefix},
                     {html, R#rstate.html}],
-            case annotate_log(false, SummaryLog, Opts) of
+            Transform = [],
+            case do_annotate_log(false, SummaryLog, Opts, Transform) of
                 ok ->
                     case R#rstate.progress of
                         silent ->
@@ -877,7 +883,7 @@ run_cases(R, [{SuiteFile, {error=Summary, FileReason}, _P, _LenP} | Scripts],
     run_cases(R, Scripts, NewSummary, NewSuiteResults, Max, CC+1, List, Opaque);
 run_cases(R, [{SuiteFile, {error, FileReason}, P, LenP} | Scripts],
           OldSummary, SuiteResults, Max, CC, List, Opaque) ->
-%%   when R#rstate.rerun =/= disable ->
+    %%   when R#rstate.rerun =/= disable ->
     AbsScript = SuiteFile,
     gen_logs(R, AbsScript, {error, FileReason}, P, LenP, Scripts,
              OldSummary, SuiteResults, Max, CC, List, Opaque);
@@ -1104,7 +1110,7 @@ run_execute(OrigR, NewR,
             [{_SuiteFile, AbsScript, P, LenP} | Scripts],
             Cmds, ParseWarnings, CaseStartTime, Opts,
             OldSummary, SuiteResults, Max, CC, List, Opaque) ->
-    ok = annotate_tmp_summary_log(NewR, OldSummary, AbsScript),
+    ok = annotate_tmp_summary_log(NewR, OldSummary, Script),
     ?TRACE_ME(70, suite, 'case', P, []),
     tap_case_begin(NewR, AbsScript),
     init_case_rlog(NewR, P, AbsScript),
@@ -1131,13 +1137,27 @@ run_execute(OrigR, NewR,
                  opaque = NewOpaque} ->
             NewRes =
                 #suite_ok{summary = Summary,
+                          shell_name = ShellName,
                           file = AbsScript,
                           full_lineno = FullLineNo,
-                          shell_name = ShellName,
+                          run_dir = SuiteRunDir,
+                          run_log_dir= SuiteRunLogDir,
                           case_log_dir = CaseLogDir,
                           case_results = CaseResults,
                           details = Details,
                           opaque = Opaque},
+            WAR =
+                #warnings_and_result{warnings = ZZ,
+                                     result = YY},
+            NewCase =
+                #run_case{name        = string(),
+                          case_prefix = string(),
+                          run_dir     = CaseRunDir,
+                          run_log_dir = CaseLogDir,
+                          event_log   = EventLog, ???(),
+                          html_log    = HtmlLog, ???()
+                          raw_result  = binary(),
+                          result      = WAR},
             NewScripts = Scripts;
         #case_error{file = MainFile,
                     full_lineno = FullLineNo,
@@ -1151,7 +1171,17 @@ run_execute(OrigR, NewR,
             NewRes =
                 #suite_error{file = MainFile,
                              full_lineno = FullLineNo,
+                             run_dir = SuiteRunDir,
+                             run_log_dir = SuiteRunLogDir,
                              reason = ReasonBin},
+            NewCase =
+                #error_case{name        :: string(),
+                            case_prefix :: string(),
+                            run_dir     :: file:filename(), % string()
+                            run_log_dir :: file:filename(), % string()
+                            reason      :: binary(),
+                            raw_result  :: binary(),
+                            result      :: #warnings_and_result{}},
             Details = ReasonBin,
             NewScripts =
                 case ReasonBin of
@@ -1177,7 +1207,7 @@ run_execute(OrigR, NewR,
     run_cases(NewR2, NewScripts, NewSummary, NewSuiteResults,
               Max, CC+1, List, NewOpaque).
 
-%% gen_logs(R, Script, {skip, ReasonStr}) ->
+%% gen_logs(R, AbsScript, {skip, ReasonStr}) ->
 %%     b();
 gen_logs(R, AbsScript, {error, FileReason}, P, LenP, Scripts,
          OldSummary, SuiteResults, Max, CC, List, Opaque) ->

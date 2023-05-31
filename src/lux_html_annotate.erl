@@ -201,15 +201,20 @@ wrap_transform(Transform, Opts) ->
                 OrigA = init_astate(SummaryLog, LogDir, Opts),
                 OrigA2 = OrigA#astate{new_log_dir = LogDir},
                 {OrigA3, _ConfigProps} = add_astate_config(OrigA2, Config),
-                [{get_script(C), OrigA3, LogDir} || C <- Cases]
+                [{get_abs_script(C), OrigA3, LogDir} || C <- Cases]
         end,
 
     lists:flatmap(Wrap, Transform).
 
-get_script(#test_case{name = AbsScript}) ->
+get_abs_script(#test_case{name = AbsScript}) ->
     AbsScript;
-get_script(#error_case{name = AbsScript}) ->
+get_abs_script(#error_case{name = AbsScript}) ->
     AbsScript.
+
+get_case_prefix(#test_case{case_prefix = CasePrefix}) ->
+    CasePrefix;
+get_case_prefix(#error_case{case_prefix = CasePrefix}) ->
+    CasePrefix.
 
 lookup_transform(AbsScript, Transform, NewA) ->
     case lists:keyfind(AbsScript, 1, Transform) of
@@ -256,9 +261,8 @@ html_cases(A, SummaryLog, Result, Cases, ConfigSection, Transform)
      lux_html_utils:html_footer()
     ].
 
-html_summary_result(A, #result_summary{summary = Summary,
-                                       sections = Sections}, Cases,
-                    IsTmp, IsMerge) ->
+html_summary_result(A, #result_summary{summary = Summary, sections = Sections},
+                    Cases,IsTmp, IsMerge) ->
     %% io:format("Sections: ~p\n", [Sections]),
     ResultString = result_string(IsTmp, IsMerge),
     PrelScriptSection =
@@ -336,16 +340,18 @@ html_summary_section(A, RS, Cases) ->
          _ ->
              [
               "<div class=\"event\"><pre>",
-              [html_summary_file(A, F, NamedLogs) || F <- FileLineNos],
+              [html_summary_file(A, F, Cases, NamedLogs) || F <- FileLineNos],
               "</pre></div>"
              ]
      end
     ].
 
-html_summary_file(A, #file_lineno{file = FileBin, lineno = LineNo}, NamedLogs)
+html_summary_file(A, #file_lineno{file = FileBin, lineno = LineNo},
+                  Cases, NamedLogs)
   when is_binary(FileBin), is_binary(LineNo) ->
     File = ?b2l(FileBin),
-    PrefixedRelScript = prefixed_rel_script(A, A, File, ""),
+    CasePrefix = lookup_case_prefix(File, Cases),
+    PrefixedRelScript = prefixed_rel_script(A, A, File, CasePrefix),
     RelFile = chop_root(drop_run_dir_prefix(A, File)),
     Label = [PrefixedRelScript, ":", LineNo],
     case lists:keyfind(File, 1, NamedLogs) of
@@ -359,8 +365,8 @@ html_summary_file(A, #file_lineno{file = FileBin, lineno = LineNo}, NamedLogs)
 html_cases2(NewA,
             [#test_case{name = AbsScript,
                         case_prefix = CasePrefix,
-                        run_dir = CaseRunDir,
-                        run_log_dir = CaseRunLogDir,
+                        run_dir = _CaseRunDir,
+                        run_log_dir = _CaseRunLogDir,
                         html_log = HtmlLog,
                         result = Res} | Cases],
             Transform)
@@ -385,8 +391,8 @@ html_cases2(NewA,
     ];
 html_cases2(NewA, [#error_case{name = AbsScript,
                                case_prefix = CasePrefix,
-                               run_dir = CaseRunDir,
-                               run_log_dir = CaseRunLogDir,
+                               run_dir = _CaseRunDir,
+                               run_log_dir = _CaseRunLogDir,
                                reason = Reason} |
                    Cases], Transform) ->
     Tag = "a",
@@ -417,7 +423,7 @@ annotate_event_log(#astate{log_file = EventLog} = A, WWW)
         {Res, NewWWW} = lux_log:scan_events(EventLog, WWW),
         case Res of
             {ok,
-             EventLog2, ConfigLog, Script,
+             EventLog2, ConfigLog, AbsScript,
              EventBins, ConfigBins, LogBins,
              ResultBins} ->
                 Events = lux_log:parse_events(EventBins, []),
@@ -427,14 +433,14 @@ annotate_event_log(#astate{log_file = EventLog} = A, WWW)
                 EventEndTime = pick_event_time(<<"end_time">>, Events),
                 Timers = lux_log:extract_timers(Events),
                 CsvBin = lux_log:timers_to_csv(Timers),
-                OrigScript = orig_script(A2, Script),
+                OrigScript = orig_script(A2, AbsScript),
                 A3 = A2#astate{start_time = EventStartTime,
                                end_time = EventEndTime,
                                script_file = OrigScript},
                 Logs = lux_log:parse_io_logs(LogBins, []),
                 Result = lux_log:parse_result(ResultBins),
-                {Annotated, Files} = interleave_code(A3, Events, Script),
-                Html = html_events(A3, EventLog2, ConfigLog, Script, Result,
+                {Annotated, Files} = interleave_code(A3, Events, AbsScript),
+                Html = html_events(A3, EventLog2, ConfigLog, AbsScript, Result,
                                    Timers, Files, Logs, Annotated,
                                    ConfigBins, ConfigProps),
                 {{ok, CsvBin, Html}, NewWWW};
@@ -633,13 +639,13 @@ do_pick_code(_F, Lines, CodeLineNo, _LineNo, _Flush, Acc) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Return event log as HTML
 
-html_events(A, EventLog, ConfigLog, Script, Result,
+html_events(A, EventLog, ConfigLog, AbsScript, Result,
             Timers, Files, Logs, Annotated,
             ConfigBins, ConfigProps)
-  when is_list(EventLog), is_list(ConfigLog), is_list(Script) ->
+  when is_list(EventLog), is_list(ConfigLog), is_list(AbsScript) ->
     SuiteLogDir = A#astate.suite_log_dir,
     EventLogDir = A#astate.new_log_dir,
-    EventLogBase = lux_utils:join(EventLogDir, filename:basename(Script)),
+    EventLogBase = lux_utils:join(EventLogDir, filename:basename(AbsScript)),
     ExtraLogs = EventLogBase ++ ?CASE_EXTRA_LOGS,
     EventDirBase = filename:basename(EventLogDir),
     LogFun =
@@ -649,14 +655,9 @@ html_events(A, EventLog, ConfigLog, Script, Result,
                    "", drop_prefix(EventLogDir, L), S, Type),
                  "</strong></td>\n"]
         end,
-    RelScript = drop_run_dir_prefix(A, Script),
-    PrefixScript =
-        case A#astate.case_prefix of
-            no_case_prefix -> RelScript;
-            CasePrefix     -> CasePrefix ++ RelScript
-        end,
-    PrefixedRelScript =
-        prefixed_rel_script(OrigA, NewA, AbsScript, CasePrefix),
+    RelScript = drop_run_dir_prefix(A, AbsScript), pick_from_summary_log(),
+    CasePrefix = pick_case_prefix_prop(ConfigProps), pick_from_summary_log(),
+    PrefixedScript = prefixed_rel_script(OrigA, NewA, AbsScript, CasePrefix),
     TimeHtml =
         case elapsed_time(A#astate.start_time, A#astate.end_time) of
             undefined ->
@@ -674,7 +675,7 @@ html_events(A, EventLog, ConfigLog, Script, Result,
     SloppyThreshold = pick_sloppy_prop(ConfigProps),
     [
      lux_html_utils:html_header(["Lux event log (", EventDirBase, ")"]),
-     "\n", lux_html_utils:html_href("h2", "", "", "#annotate", PrefixScript),
+     "\n", lux_html_utils:html_href("h2", "", "", "#annotate", PrefixedScript),
      html_result("h2", Result, ""),
      lux_html_utils:html_anchor("info", ""),
      "\n", TimeHtml,
@@ -1195,6 +1196,16 @@ html_scripts(A, [#file{script = Path, orig_script = OrigScript} | Files],
 html_scripts(_A, [], _Level) ->
     ["<br/>"].
 
+%% Crash if not found
+lookup_case_prefix(File, [Case | Cases]) ->
+    AbsScript = get_abs_script(Case),
+    if
+        File =:= AbsScript ->
+            get_case_prefix(Case);
+        true ->
+            lookup_case_prefix(File, Cases)
+    end.
+
 prefixed_rel_script(OrigA, NewA, AbsScript, CasePrefix)
   when is_list(AbsScript) ->
     RelScript = drop_rel_dir_prefix(OrigA, rel_script(OrigA, AbsScript)),
@@ -1249,6 +1260,9 @@ pick_sloppy_prop(ConfigProps) ->
         false -> ?DEFAULT_SLOPPY_THRESHOLD;
         Bin  -> ?b2l(Bin)
     end.
+
+pick_case_prefix_prop(ConfigProps) ->
+    ?b2l(lux_log:find_config(case_prefix, ConfigProps, <<>>)).
 
 pick_dir_prop(Tag, ConfigProps) ->
     case lux_log:find_config(Tag, ConfigProps, undefined) of

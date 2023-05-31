@@ -60,7 +60,7 @@ testcase(#error_case{name = Filename, reason = Reason}, RunDir, Indent) ->
      Indent, ?INDENT, "<system-out>", Reason, "</system-out>\n",
      Indent, "</testcase>\n"
     ];
-testcase(#test_case{name = Filename, result = Result}, RunDir, Indent) ->
+testcase(#run_case{name = Filename, result = Result}, RunDir, Indent) ->
     [
      Indent, "<testcase ",
      "classname=\"", classname(Filename, RunDir), "\" ",

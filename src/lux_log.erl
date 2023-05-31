@@ -279,23 +279,23 @@ split_cases([Case | Cases], SuiteRunDir, SuiteRunLogDir, CasePrefix,
              {<<"script", _/binary>>, _} | OptEventLog] ->
                 %% Old style
                 Name = ?b2l(RawName),
-                TC = #test_case{name = Name,
-                                case_prefix = CasePrefix,
-                                run_dir = SuiteRunDir,
-                                run_log_dir = SuiteRunLogDir,
-                                raw_result = RawResult,
-                                result = WR},
+                TC = #run_case{name = Name,
+                               case_prefix = CasePrefix,
+                               run_dir = SuiteRunDir,
+                               run_log_dir = SuiteRunLogDir,
+                               raw_result = RawResult,
+                               result = WR},
                 opt_add_event_log(OptEventLog, TC, EventLogs);
             [{<<"test case", _/binary>>, RawName},
              {<<"run dir", _/binary>>, RawCaseRunDir},
              {<<"log dir", _/binary>>, RawCaseRunLogDir} | OptEventLog] ->
                 Name = ?b2l(RawName),
-                TC = #test_case{name = Name,
-                                case_prefix = CasePrefix,
-                                run_dir = ?b2l(RawCaseRunDir),
-                                run_log_dir = ?b2l(RawCaseRunLogDir),
-                                raw_result = RawResult,
-                                result = WR},
+                TC = #run_case{name = Name,
+                               case_prefix = CasePrefix,
+                               run_dir = ?b2l(RawCaseRunDir),
+                               run_log_dir = ?b2l(RawCaseRunLogDir),
+                               raw_result = RawResult,
+                               result = WR},
                 opt_add_event_log(OptEventLog, TC, EventLogs)
         end,
     split_cases(Cases, SuiteRunDir, SuiteRunLogDir, CasePrefix,
@@ -307,13 +307,13 @@ split_cases([], _SuiteRunDir, _SuiteRunLogDir, _CasePrefix,
 opt_add_event_log(OptEventLog, TC, EventLogs) ->
     case OptEventLog of
         [] ->
-            {TC#test_case{event_log = "",
-                          html_log = ""},
+            {TC#run_case{event_log = "",
+                         html_log = ""},
              EventLogs};
         [{<<"event log", _/binary>>, RawEventLog}] ->
             EventLog = ?b2l(RawEventLog),
-            {TC#test_case{event_log = EventLog,
-                          html_log = EventLog ++ ".html"},
+            {TC#run_case{event_log = EventLog,
+                         html_log = EventLog ++ ".html"},
              [EventLog | EventLogs]}
     end.
 
@@ -464,11 +464,11 @@ split_config(ConfigBins) ->
 parse_run_case(NewLogDir, SuiteRunDir, SuiteRunLogDir,
                StartTime, Branch, Host, ConfigName,
                Suite, RunId, ReposRev,
-               #test_case{name = AbsName,
-                          run_dir = OrigCaseRunDir,
-                          run_log_dir = OrigCaseRunLogDir,
-                          event_log = AbsEventLog,
-                          result = CaseRes})
+               #run_case{name = AbsName,
+                         run_dir = OrigCaseRunDir,
+                         run_log_dir = OrigCaseRunLogDir,
+                         event_log = AbsEventLog,
+                         result = CaseRes})
   when is_binary(NewLogDir), is_list(SuiteRunDir), is_list(SuiteRunLogDir),
        is_list(AbsName), is_list(AbsEventLog) ->
     RelEventLog0 = lux_utils:drop_prefix(OrigCaseRunLogDir, AbsEventLog),

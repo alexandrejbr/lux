@@ -284,7 +284,7 @@
         {warnings :: [binary()],
          result   :: case_result()}).
 
--record(test_case,
+-record(run_case,
         {name        :: string(),
          case_prefix :: string(),
          run_dir     :: file:filename(), % string()
