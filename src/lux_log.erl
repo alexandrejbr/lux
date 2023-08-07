@@ -11,7 +11,7 @@
          is_temporary/1, parse_summary_log/2, parse_run_summary/4,
          default_run/2,
          open_summary_log/3, close_summary_tmp_log/1, close_summary_log/2,
-         write_config_log/2, split_config/1, find_config/3,
+         write_config_log/2, find_config/3,
          write_results/5, print_results/5, parse_result/1, pick_result/2,
          safe_format/3, safe_write/2, double_write/3,
          open_event_log/6, close_event_log/1, write_events/7, scan_events/2,
@@ -123,7 +123,7 @@ try_parse_summary_log(#source{file = SummaryLogBin}, WWW) ->
         end,
     {Res, NewWWW}.
 
-do_parse_summary_log(SummaryLog, Sections, NewWWW) ->
+do_parse_summary_log(SummaryLog, ConfigProps???, Sections, NewWWW) ->
     LogDir = filename:dirname(SummaryLog),
     ConfigLog = lux_utils:join(LogDir, ?SUITE_CONFIG_LOG),
     {{ok, RawConfig}, NewWWW} = scan_config(ConfigLog, NewWWW),
@@ -800,7 +800,7 @@ scan_events(EventLog, WWW) when is_list(EventLog) ->
             {{error, EventLog, FileReason}, NewWWW}
     end.
 
-do_scan_events(EventLog, ES, WWW) ->
+do_scan_events(EventLog, ConfigBins???, ES, WWW) ->
     EventSections = [binary:split(S, <<"\n">>, [global]) || S <- ES],
     case EventSections of
         [[ScriptBin], EventBins, ResultBins] -> ok;
@@ -823,7 +823,7 @@ do_scan_events(EventLog, ES, WWW) ->
                 ConfigBins = binary:split(ConfigSection, <<"\n">>, [global]),
                 {ok, EventLog, ConfigLog,
                  Script, EventBins, ConfigBins, LogBins, ResultBins};
-            {ok, [ConfigSection,LogSection]} ->
+            {ok, [ConfigSection, LogSection]} ->
                 ConfigProps = binary:split(ConfigSection, <<"\n">>, [global]),
                 LogBins = binary:split(LogSection, <<"\n">>, [global]),
                 {ok, EventLog, ConfigLog,
@@ -1229,6 +1229,16 @@ csv_to_timers(CsvFile) ->
         {error, FileReason} ->
             {error, CsvFile, file:format_error(FileReason)}
     end.
+
+parse_config(ConfigLog, WWW) when is_list(ConfigLog) ->
+
+    scan_config(ConfigLog, WWW).
+
+
+    {ok, ConfigBlob} = file:read_file(ConfigLog),
+    ConfigBins = binary:split(ConfigBlob, <<"\n">>, [global]),
+    ConfigProps = split_config(ConfigBins),
+    {ConfigProps, NewWWW}.
 
 scan_config(ConfigLog, WWW) when is_list(ConfigLog) ->
     {ReadRes, NewWWW} = read_log(ConfigLog, ?CONFIG_TAG, WWW),
