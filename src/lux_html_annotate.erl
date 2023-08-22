@@ -655,7 +655,8 @@ html_events(A, EventLog, ConfigLog, Script, Result,
             no_case_prefix -> RelScript;
             CasePrefix     -> CasePrefix ++ RelScript
         end,
-prefixed_rel_script(OrigA, NewA, AbsScript, CasePrefix), ???(),
+    PrefixedRelScript =
+        prefixed_rel_script(OrigA, NewA, AbsScript, CasePrefix),
     TimeHtml =
         case elapsed_time(A#astate.start_time, A#astate.end_time) of
             undefined ->
