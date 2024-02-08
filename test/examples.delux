@@ -1,6 +1,10 @@
 [doc Test examples]
 
+[config require=LUX_EXTRA_LOGS]
+[config require=LUX_SHELLNAME]
+
 [include include/macros.luxinc]
+
 [global eprompt=\d+>\s]
 
 [shell test]
@@ -14,14 +18,14 @@
     """
     """?
     test case         : .*examples/fail.lux
-    result            : FAIL at line 32 in shell calculator
+    result            : FAIL at line 35 in shell calculator
     expected\*
     	19
     actual match_timeout
     	
-    	$eprompt.*
+    	${eprompt}.*
     	18
-    	$eprompt
+    	${eprompt}
     diff
     	- 19
     	\+ 

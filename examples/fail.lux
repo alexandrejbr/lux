@@ -11,8 +11,11 @@
 
     # Multi-line expect
     """?
+    erl
+    Erlang/OTP.*
+
     Eshell.*
-    $eprompt
+    ${eprompt}
     """
 
     # Multi-line send

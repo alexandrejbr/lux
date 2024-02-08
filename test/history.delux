@@ -1,8 +1,10 @@
 [doc Test history generation]
 
-[include include/macros.luxinc]
-
 [config timeout=20000]
+[config require=LUX_EXTRA_LOGS]
+[config require=LUX_SHELLNAME]
+
+[include include/macros.luxinc]
 
 [shell plain]
     [progress plain]

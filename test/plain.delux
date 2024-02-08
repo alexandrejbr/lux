@@ -1,5 +1,8 @@
 [doc Plain lux tests]
 
+[config require=LUX_EXTRA_LOGS]
+[config require=LUX_SHELLNAME]
+
 [include include/macros.luxinc]
 
 [shell test]
